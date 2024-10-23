@@ -143,11 +143,8 @@ let fold_over_parsetree (parsetree : Mreader.parsetree) =
           let lident_range = Range.of_loc lident.Asttypes.loc in
           let pat_range = Range.of_loc pat.Parsetree.ppat_loc in
           push { Range.start = lident_range.end_; end_ = pat_range.end_ })
-      | Ppat_var _
-      | Ppat_alias _
-      | Ppat_constant _
-      | Ppat_interval _
-      | Ppat_tuple _
+      | Ppat_var _ | Ppat_alias _ | Ppat_constant _ | Ppat_interval _ | Ppat_tuple _
+      | Ppat_unboxed_tuple (_, _)
       | Ppat_construct _
       | Ppat_variant _
       | Ppat_array _
@@ -204,6 +201,7 @@ let fold_over_parsetree (parsetree : Mreader.parsetree) =
       | Pexp_lazy _
       | Pexp_letexception _
       | Pexp_tuple _
+      | Pexp_unboxed_tuple _
       | Pexp_construct _
       | Pexp_ident _
       | Pexp_constant _
@@ -217,6 +215,7 @@ let fold_over_parsetree (parsetree : Mreader.parsetree) =
       | Pexp_setinstvar _
       | Pexp_override _
       | Pexp_assert _
+      | Pexp_stack _
       | Pexp_unreachable -> Ast_iterator.default_iterator.expr self expr
     in
     let module_binding
@@ -254,7 +253,7 @@ let fold_over_parsetree (parsetree : Mreader.parsetree) =
       | Pstr_extension _ ->
         Range.of_loc structure_item.pstr_loc |> push;
         Ast_iterator.default_iterator.structure_item self structure_item
-      | Pstr_include { pincl_loc; pincl_mod; pincl_attributes } ->
+      | Pstr_include { pincl_loc; pincl_mod; pincl_attributes; pincl_kind = _ } ->
         push @@ Range.of_loc pincl_loc;
         self.module_expr self pincl_mod;
         self.attributes self pincl_attributes
@@ -293,14 +292,17 @@ let fold_over_parsetree (parsetree : Mreader.parsetree) =
   List.rev_map !ranges ~f:folding_range
 ;;
 
-let compute (state : State.t) (params : FoldingRangeParams.t) =
+let compute
+  (state : State.t)
+  (params : FoldingRangeParams.t)
+  =
   Fiber.of_thunk (fun () ->
     let doc = Document_store.get state.store params.textDocument.uri in
     match Document.kind doc with
     | `Other -> Fiber.return None
     | `Merlin m ->
       let+ ranges =
-        Document.Merlin.with_pipeline_exn ~name:"folding range" m (fun pipeline ->
+        Document.Merlin.with_pipeline_exn m (fun pipeline ->
           let parsetree = Mpipeline.reader_parsetree pipeline in
           fold_over_parsetree parsetree)
       in

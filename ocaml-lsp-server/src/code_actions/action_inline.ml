@@ -19,7 +19,7 @@ let check_shadowing (inlined_expr : Typedtree.expression) new_env =
   let exception Env_mismatch of (Longident.t * [ `Unbound | `Shadowed ]) in
   let expr_iter (iter : I.iterator) (expr : Typedtree.expression) =
     match expr.exp_desc with
-    | Texp_ident (path, { txt = ident; _ }, _) ->
+    | Texp_ident (path, { txt = ident; _ }, _, _, _) ->
       let in_orig_env =
         find_path_by_name ident orig_env
         |> Option.map ~f:(Path.same path)
@@ -66,7 +66,7 @@ let find_inline_task typedtree pos =
       match expr.exp_desc with
       | Texp_let
           ( Nonrecursive
-          , [ { vb_pat = { pat_desc = Tpat_var (inlined_var, { loc; _ }, _); _ }
+          , [ { vb_pat = { pat_desc = Tpat_var (inlined_var, { loc; _ }, _, _); _ }
               ; vb_expr = inlined_expr
               ; _
               }
@@ -81,7 +81,7 @@ let find_inline_task typedtree pos =
       match item.str_desc with
       | Tstr_value
           ( Nonrecursive
-          , [ { vb_pat = { pat_desc = Tpat_var (inlined_var, { loc; _ }, _); _ }
+          , [ { vb_pat = { pat_desc = Tpat_var (inlined_var, { loc; _ }, _, _); _ }
               ; vb_expr = inlined_expr
               ; _
               }
@@ -154,13 +154,13 @@ end = struct
     let paths = ref Loc.Map.empty in
     let expr_iter (iter : I.iterator) (expr : Typedtree.expression) =
       match expr.exp_desc with
-      | Texp_ident (path, { loc; _ }, _) -> paths := Loc.Map.set !paths loc path
+      | Texp_ident (path, { loc; _ }, _, _, _) -> paths := Loc.Map.set !paths loc path
       | _ -> I.default_iterator.expr iter expr
     in
     let pat_iter (type k) (iter : I.iterator) (pat : k Typedtree.general_pattern) =
       match pat.pat_desc with
-      | Tpat_var (id, { loc; _ }, _) -> paths := Loc.Map.set !paths loc (Pident id)
-      | Tpat_alias (pat, id, { loc; _ }, _) ->
+      | Tpat_var (id, { loc; _ }, _, _) -> paths := Loc.Map.set !paths loc (Pident id)
+      | Tpat_alias (pat, id, { loc; _ }, _, _) ->
         paths := Loc.Map.set !paths loc (Pident id);
         I.default_iterator.pat iter pat
       | _ -> I.default_iterator.pat iter pat
@@ -193,7 +193,7 @@ let subst same subst_expr subst_id body =
 let rec is_pure (expr : Parsetree.expression) =
   match expr.pexp_desc with
   | Pexp_ident _ | Pexp_constant _ | Pexp_unreachable -> true
-  | Pexp_field (e, _) | Pexp_constraint (e, _) -> is_pure e
+  | Pexp_field (e, _) | Pexp_constraint (e, _, _) -> is_pure e
   | _ -> false
 ;;
 
@@ -215,11 +215,24 @@ let beta_reduce (paths : Paths.t) (app : Parsetree.expression) =
     match pat.ppat_desc with
     | Ppat_any | Ppat_construct ({ txt = Lident "()"; _ }, _) ->
       if is_pure arg then body else with_let ()
-    | Ppat_var param | Ppat_constraint ({ ppat_desc = Ppat_var param; _ }, _) ->
+    | Ppat_var param | Ppat_constraint ({ ppat_desc = Ppat_var param; _ }, _, _) ->
       if is_pure arg then with_subst param else with_let ()
-    | Ppat_tuple pats ->
+    | Ppat_tuple (pats, Closed) ->
       (match arg.pexp_desc with
-       | Pexp_tuple args -> List.fold_left2 ~f:beta_reduce_arg ~init:body pats args
+       | Pexp_tuple args ->
+         (* Match up elements based on their order. If there are any labels, this means
+            that we cannot rely on their order, so we bail out. *)
+         let beta_reduce_element body (pat_label, pat) (arg_label, arg) =
+           match body, pat_label, arg_label with
+           | Some body, None, None -> Some (beta_reduce_arg body pat arg)
+           | None, _, _ | _, Some _, _ | _, _, Some _ -> None
+         in
+         let result_if_no_labels =
+           List.fold_left2 ~f:beta_reduce_element ~init:(Some body) pats args
+         in
+         (match result_if_no_labels with
+          | Some result -> result
+          | None -> with_let ())
        | _ -> with_let ())
     | _ -> with_let ()
   in
@@ -274,12 +287,12 @@ let inline_edits pipeline task =
   let arg_iter
     env
     (iter : I.iterator)
-    (label : Asttypes.arg_label)
+    (label : Typedtree.arg_label)
     (m_arg_expr : Typedtree.expression option)
     =
     match label, m_arg_expr with
     (* handle the labeled argument shorthand `f ~x` when inlining `x` *)
-    | Labelled name, Some { exp_desc = Texp_ident (Pident id, { loc; _ }, _); _ }
+    | Labelled name, Some { exp_desc = Texp_ident (Pident id, { loc; _ }, _, _, _); _ }
     (* inlining is allowed for optional arguments that are being passed a Some
        parameter, i.e. `x` may be inlined in `let x = 1 in (fun ?(x = 0) -> x)
        ~x` *)
@@ -288,7 +301,10 @@ let inline_edits pipeline task =
           { exp_desc =
               (* construct is part of desugaring, assumed to be Some *)
               Texp_construct
-                (_, _, [ { exp_desc = Texp_ident (Pident id, { loc; _ }, _); _ } ])
+                ( _
+                , _
+                , [ { exp_desc = Texp_ident (Pident id, { loc; _ }, _, _, _); _ } ]
+                , _ )
           ; _
           } )
       when Ident.same task.inlined_var id && not_shadowed env ->
@@ -300,6 +316,9 @@ let inline_edits pipeline task =
        optional parameter i.e. `x` may _not_ be inlined in `let x = Some 1 in
        (fun ?(x = 0) -> x) ?x` *)
     | Optional _, Some _ -> ()
+    (* inlining is not allowed for source position arguments because the source
+       location would not be well defined *)
+    | Position _, Some _ -> ()
     | _, _ -> Option.iter m_arg_expr ~f:(iter.expr iter)
   in
   let paths = Paths.of_typedtree task.inlined_expr in
@@ -308,7 +327,7 @@ let inline_edits pipeline task =
     match expr.exp_desc with
     (* when inlining into an application context, attempt to beta reduce the
        result *)
-    | Texp_apply ({ exp_desc = Texp_ident (Pident id, _, _); _ }, _)
+    | Texp_apply ({ exp_desc = Texp_ident (Pident id, _, _, _, _); _ }, _, _, _, _)
       when Ident.same task.inlined_var id && not_shadowed expr.exp_env ->
       let reduced_pexpr =
         let app_pexpr = find_parsetree_loc_exn pipeline expr.exp_loc in
@@ -322,10 +341,16 @@ let inline_edits pipeline task =
         @@ strip_attribute "merlin.loc" reduced_pexpr
       in
       insert_edit newText expr.exp_loc
-    | Texp_apply (func, args) ->
+    | Texp_apply (func, args, _, _, _) ->
       iter.expr iter func;
-      List.iter args ~f:(fun (l, e) -> arg_iter expr.exp_env iter l e)
-    | Texp_ident (Pident id, { loc; _ }, _)
+      List.iter args ~f:(fun (l, e) ->
+        let e =
+          match e with
+          | Typedtree.Arg (e, _sort) -> Some e
+          | Omitted _ -> None
+        in
+        arg_iter expr.exp_env iter l e)
+    | Texp_ident (Pident id, { loc; _ }, _, _, _)
       when Ident.same task.inlined_var id && not_shadowed expr.exp_env ->
       insert_edit newText loc
     | _ -> I.default_iterator.expr iter expr

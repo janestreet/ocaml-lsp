@@ -276,6 +276,7 @@ end
 (** To traverse OCaml parsetree and produce semantic tokens. *)
 module Parsetree_fold (M : sig
     val source : string
+    val mconfig : Mconfig.t
   end) : sig
   val apply : Mreader.parsetree -> Tokens.t
 end = struct
@@ -354,7 +355,7 @@ end = struct
     (ca : Parsetree.constructor_arguments)
     =
     match ca with
-    | Pcstr_tuple l -> List.iter l ~f:(fun ct -> self.typ self ct)
+    | Pcstr_tuple l -> List.iter l ~f:(fun (ca : Parsetree.constructor_argument) -> self.typ self ca.pca_type)
     | Pcstr_record l -> List.iter l ~f:(fun r -> self.label_declaration self r)
   ;;
 
@@ -389,12 +390,9 @@ end = struct
       | Ptyp_any -> `Custom_iterator
       | Ptyp_variant (_, _, _)
       | Ptyp_alias (_, _)
-      | Ptyp_arrow _
-      | Ptyp_extension _
-      | Ptyp_package _
-      | Ptyp_object _
-      | Ptyp_tuple _
-      | Ptyp_open _ -> `Default_iterator
+      | Ptyp_arrow _ | Ptyp_extension _ | Ptyp_package _ | Ptyp_object _
+      | Ptyp_open (_, _)
+      | Ptyp_tuple _ | Ptyp_unboxed_tuple _ -> `Default_iterator
     in
     match iter with
     | `Default_iterator -> Ast_iterator.default_iterator.typ self ct
@@ -419,7 +417,13 @@ end = struct
 
   let label_declaration
     (self : Ast_iterator.iterator)
-    ({ pld_name; pld_mutable = _; pld_type; pld_loc = _; pld_attributes } :
+    ({ pld_name
+     ; pld_mutable = _
+     ; pld_type
+     ; pld_loc = _
+     ; pld_attributes
+     ; pld_modalities = _
+     } :
       Parsetree.label_declaration)
     =
     add_token pld_name.loc (Token_type.of_builtin Property) Token_modifiers_set.empty;
@@ -443,8 +447,8 @@ end = struct
            self.expr self pvb_expr;
            `Custom_iterator
          | _ -> `Default_iterator)
-      | ( Ppat_constraint ({ ppat_desc = Ppat_var n; _ }, pat_ct)
-        , Pexp_constraint (e, exp_ct) )
+      | ( Ppat_constraint ({ ppat_desc = Ppat_var n; _ }, Some pat_ct, _)
+        , Pexp_constraint (e, Some exp_ct, _) )
         when Loc.compare pat_ct.ptyp_loc exp_ct.ptyp_loc = 0 ->
         (* handles [let f : t -> unit = fun t -> ()] *)
         add_token
@@ -507,12 +511,10 @@ end = struct
   ;;
 
   let const loc (constant : Parsetree.constant) =
-    let token_type =
-      match constant with
-      | Parsetree.Pconst_integer _ | Pconst_float _ -> Token_type.of_builtin Number
-      | Pconst_char _ | Pconst_string _ -> Token_type.of_builtin String
-    in
-    add_token loc token_type Token_modifiers_set.empty
+    match constant with
+    | Parsetree.Pconst_integer _ | Pconst_float _ ->
+      add_token loc (Token_type.of_builtin Number) Token_modifiers_set.empty
+    | Pconst_char _ | Pconst_string _ -> ()
   ;;
 
   let pexp_apply (self : Ast_iterator.iterator) (expr : Parsetree.expression) args =
@@ -568,9 +570,44 @@ end = struct
            Option.iter vo ~f:(fun v -> self.expr self v));
         `Custom_iterator
       | Pexp_apply (expr, args) -> pexp_apply self expr args
-      | Pexp_function _ | Pexp_let (_, _, _) -> `Default_iterator
+      | Pexp_let (_, _, _) -> `Default_iterator
+      | Pexp_function (params, constraint_, function_body) ->
+        List.iter params ~f:(fun (param : Parsetree.function_param) ->
+          match param.pparam_desc with
+          (* handles types like [type a] in [let f (type a) x y z = ...] *)
+          | Pparam_newtype (t, _) ->
+            add_token
+              t.loc
+              (Token_type.of_builtin TypeParameter)
+              Token_modifiers_set.empty
+          (* handles value parameters and optional args *)
+          | Pparam_val (_, expr_opt, pat) ->
+            (match expr_opt with
+             | None -> self.pat self pat
+             | Some e ->
+               if Loc.compare e.pexp_loc pat.ppat_loc < 0
+               then (
+                 self.expr self e;
+                 self.pat self pat)
+               else (
+                 self.pat self pat;
+                 self.expr self e)));
+        (* handles type constraints like [let f () : ty = ...] *)
+        Option.iter constraint_ ~f:(fun constraint_ ->
+          match constraint_.type_constraint with
+          | Pconstraint ct -> self.typ self ct
+          | Pcoerce (ct1, ct2) ->
+            Option.iter ct1 ~f:(self.typ self);
+            self.typ self ct2);
+        (match function_body with
+         | Pfunction_body e -> self.expr self e
+         | Pfunction_cases (cases, loc, attributes) ->
+           self.cases self cases;
+           self.location self loc;
+           self.attributes self attributes);
+        `Custom_iterator
       | Pexp_try (_, _)
-      | Pexp_tuple _
+      | Pexp_tuple _ | Pexp_unboxed_tuple _
       | Pexp_variant (_, _)
       (* ^ label for a poly variant is missing location info -- we could have a
          workaround by "parsing" this part of code ourselves*)
@@ -615,15 +652,12 @@ end = struct
         self.expr self e0;
         self.expr self e1;
         `Custom_iterator
-      | Pexp_constraint (e, ct) ->
-        (* handles [let f () : int = 1] and [let f () = (1 : int)] *)
-        if Loc.compare e.pexp_loc ct.ptyp_loc > 0
-        then (
-          self.typ self ct;
-          self.expr self e)
-        else (
-          self.expr self e;
-          self.typ self ct);
+      | Pexp_constraint (e, ct, _) ->
+        self.expr self e;
+        Option.iter ct ~f:(self.typ self);
+        `Custom_iterator
+      | Pexp_stack e ->
+        self.expr self e;
         `Custom_iterator
       | Pexp_letop { let_; ands; body } ->
         List.iter
@@ -706,9 +740,9 @@ end = struct
           if Loc.compare fld.loc pat.ppat_loc <> 0 (* handles field punning *)
           then self.pat self pat);
         `Custom_iterator
-      | Ppat_constraint (p, ct) ->
+      | Ppat_constraint (p, ct, _) ->
         self.pat self p;
-        self.typ self ct;
+        Option.iter ct ~f:(self.typ self);
         `Custom_iterator
       | Ppat_or _
       | Ppat_exception _
@@ -716,6 +750,7 @@ end = struct
       | Ppat_array _
       | Ppat_extension _
       | Ppat_tuple _
+      | Ppat_unboxed_tuple _
       | Ppat_lazy _
       | Ppat_any
       | Ppat_interval _ -> `Default_iterator
@@ -772,13 +807,19 @@ end = struct
 
   let value_description
     (self : Ast_iterator.iterator)
-    ({ pval_name; pval_type; pval_prim = _; pval_attributes; pval_loc = _ } :
+    ({ pval_name
+     ; pval_type
+     ; pval_prim = _
+     ; pval_attributes
+     ; pval_loc = _
+     ; pval_modalities = _
+     } :
       Parsetree.value_description)
     =
     add_token
       pval_name.loc
       (match pval_type.ptyp_desc with
-       | Ptyp_arrow (_, _, _) -> Token_type.of_builtin Function
+       | Ptyp_arrow (_, _, _, _, _) -> Token_type.of_builtin Function
        | Ptyp_class (_, _) -> Token_type.of_builtin Class
        | Ptyp_package _ -> Token_type.module_
        | Ptyp_extension _
@@ -787,7 +828,8 @@ end = struct
        | Ptyp_alias (_, _)
        | Ptyp_variant (_, _, _)
        | Ptyp_poly (_, _)
-       | Ptyp_tuple _ | Ptyp_any | Ptyp_var _ | Ptyp_open _ ->
+       | Ptyp_open (_, _)
+       | Ptyp_tuple _ | Ptyp_unboxed_tuple _ | Ptyp_any | Ptyp_var _ ->
          Token_type.of_builtin Variable)
       (Token_modifiers_set.singleton Declaration);
     self.typ self pval_type;
@@ -875,13 +917,15 @@ let gen_new_id =
 ;;
 
 let compute_tokens doc =
-  let+ parsetree, source =
-    Document.Merlin.with_pipeline_exn ~name:"semantic highlighting" doc (fun p ->
+  let* parsetree, source =
+    Document.Merlin.with_pipeline_exn doc (fun p ->
       Mpipeline.reader_parsetree p, Mpipeline.input_source p)
   in
+  let+ config = Document.Merlin.mconfig doc in
   let module Fold =
     Parsetree_fold (struct
       let source = Msource.text source
+      let mconfig = config
     end)
   in
   Fold.apply parsetree
@@ -897,7 +941,18 @@ let compute_encoded_tokens doc =
 module Debug = struct
   let meth_request_full = "ocamllsp/textDocument/semanticTokens/full"
 
-  let on_request_full : params:Jsonrpc.Structured.t option -> State.t -> Json.t Fiber.t =
+  let get_doc_id ~(params : Jsonrpc.Structured.t option) =
+    match params with
+    | Some (`Assoc _ as json) | Some (`List _ as json) ->
+      let params = SemanticTokensParams.t_of_yojson json in
+      Some params.textDocument
+    | None -> None
+  ;;
+
+  let on_request_full
+    :  params:Jsonrpc.Structured.t option -> State.t
+    -> Json.t Fiber.t
+    =
     fun ~params state ->
     Fiber.of_thunk (fun () ->
       match params with
@@ -925,7 +980,9 @@ module Debug = struct
   ;;
 end
 
-let on_request_full : State.t -> SemanticTokensParams.t -> SemanticTokens.t option Fiber.t
+let on_request_full
+  :  State.t -> SemanticTokensParams.t
+  -> SemanticTokens.t option Fiber.t
   =
   fun state params ->
   Fiber.of_thunk (fun () ->

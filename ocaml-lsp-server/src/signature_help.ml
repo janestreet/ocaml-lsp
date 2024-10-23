@@ -11,7 +11,7 @@ open struct
 end
 
 type parameter_info =
-  { label : Asttypes.arg_label
+  { label : Typedtree.arg_label
   ; param_start : int
   ; param_end : int
   ; argument : Typedtree.expression option
@@ -35,7 +35,7 @@ let extract_ident (exp_desc : Typedtree.expression_desc) =
     | Lapply (p1, p2) -> Format.fprintf ppf "%a(%a)" longident p1 longident p2
   in
   match exp_desc with
-  | Texp_ident (_, { txt = li; _ }, _) ->
+  | Texp_ident (_, { txt = li; _ }, _, _, _) ->
     let ppf, to_string = Format.to_string () in
     longident ppf li;
     Some (to_string ())
@@ -69,7 +69,7 @@ let pp_parameter_type env ppf ty =
 
 (* print parameter labels and types *)
 let pp_parameter env label ppf ty =
-  match (label : Asttypes.arg_label) with
+  match (label : Typedtree.arg_label) with
   | Nolabel -> pp_parameter_type env ppf ty
   | Labelled l -> Format.fprintf ppf "%s:%a" l (pp_parameter_type env) ty
   | Optional l ->
@@ -81,6 +81,7 @@ let pp_parameter env label ppf ty =
       | _ -> ty
     in
     Format.fprintf ppf "?%s:%a" l (pp_parameter_type env) (unwrap_option ty)
+  | Position l -> Format.fprintf ppf "%s:[%%call_pos]" l
 ;;
 
 (* record buffer offsets to be able to underline parameter types *)
@@ -99,10 +100,15 @@ let separate_function_signature ~args (e : Typedtree.expression) =
   let ppf = Format.formatter_of_buffer buffer in
   let rec separate ?(i = 0) ?(parameters = []) args ty =
     match args, Types.get_desc ty with
-    | (_l, arg) :: args, Tarrow (label, ty1, ty2, _) ->
+    | (_l, arg) :: args, Tarrow ((label, _, _), ty1, ty2, _) ->
+      let arg =
+        match arg with
+        | Typedtree.Arg (e, _sort) -> Some e
+        | Omitted _ -> None
+      in
       let parameter = print_parameter_offset ppf buffer e.exp_env label ty1 ?arg in
       separate args ty2 ~i:(succ i) ~parameters:(parameter :: parameters)
-    | [], Tarrow (label, ty1, ty2, _) ->
+    | [], Tarrow ((label, _, _), ty1, ty2, _) ->
       let parameter = print_parameter_offset ppf buffer e.exp_env label ty1 in
       separate args ty2 ~i:(succ i) ~parameters:(parameter :: parameters)
     (* end of function type, print remaining type without recording offsets *)
@@ -129,7 +135,7 @@ let active_parameter_by_arg ~arg params =
 
 let active_parameter_by_prefix ~prefix params =
   let common = function
-    | Asttypes.Nolabel -> Some 0
+    | Typedtree.Nolabel -> Some 0
     | l when String.is_prefixed ~by:"~" prefix || String.is_prefixed ~by:"?" prefix ->
       Some (String.common_prefix_len (Btype.prefixed_label_name l) prefix)
     | _ -> None
@@ -156,7 +162,7 @@ let is_arrow t =
 let application_signature ~prefix = function
   (* provide signature information for applied functions *)
   | (_, Browse_raw.Expression arg)
-    :: (_, Expression { exp_desc = Texp_apply (({ exp_type; _ } as e), args); _ })
+    :: (_, Expression { exp_desc = Texp_apply (({ exp_type; _ } as e), args, _, _, _); _ })
     :: _
     when is_arrow exp_type ->
     let result = separate_function_signature e ~args in
@@ -189,7 +195,10 @@ let format_doc ~markdown ~doc =
      else { MarkupContent.value = doc; kind = MarkupKind.PlainText })
 ;;
 
-let run (state : State.t) { SignatureHelpParams.textDocument = { uri }; position; _ } =
+let run
+  (state : State.t)
+  { SignatureHelpParams.textDocument = { uri }; position; _ }
+  =
   let open Fiber.O in
   let doc =
     let store = state.store in
@@ -209,11 +218,13 @@ let run (state : State.t) { SignatureHelpParams.textDocument = { uri }; position
     Fiber.return help
   | `Merlin merlin ->
     let* application_signature =
-      let* inside_comment = Check_for_comments.position_in_comment ~position ~merlin in
+      let* inside_comment =
+        Check_for_comments.position_in_comment ~position ~merlin
+      in
       match inside_comment with
       | true -> Fiber.return None
       | false ->
-        Document.Merlin.with_pipeline_exn ~name:"signature-help" merlin (fun pipeline ->
+        Document.Merlin.with_pipeline_exn merlin (fun pipeline ->
           let typer = Mpipeline.typer_result pipeline in
           let pos = Mpipeline.get_lexing_pos pipeline pos in
           let node = Mtyper.node_at typer pos in
@@ -231,7 +242,6 @@ let run (state : State.t) { SignatureHelpParams.textDocument = { uri }; position
        let offset = String.length prefix in
        let+ doc =
          Document.Merlin.doc_comment
-           ~name:"signature help-position"
            merlin
            application_signature.function_position
        in
@@ -243,7 +253,7 @@ let run (state : State.t) { SignatureHelpParams.textDocument = { uri }; position
          in
          let documentation =
            let open Option.O in
-           let+ doc in
+           let+ doc = doc in
            let markdown =
              ClientCapabilities.markdown_support
                (State.client_capabilities state)

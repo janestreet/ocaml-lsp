@@ -68,14 +68,17 @@ let tightest_enclosing_binder_position typedtree range =
       I.default_iterator.expr iter expr;
       match expr.exp_desc with
       | Texp_let (_, _, body)
-      | Texp_while (_, body)
-      | Texp_for (_, _, _, _, _, body)
+      | Texp_while { wh_body = body; _ }
+      | Texp_for { for_body = body; _ }
       | Texp_letmodule (_, _, _, _, body)
       | Texp_letexception (_, body)
       | Texp_open (_, body) -> found_if_expr_contains body
       | Texp_letop { body; _ } -> found_if_case_contains [ body ]
-      | Texp_function (_, Tfunction_cases { cases; _ }) -> found_if_case_contains cases
-      | Texp_match (_, cases, _) -> found_if_case_contains cases
+      | Texp_function { body; _ } ->
+        (match body with
+         | Tfunction_body expr -> found_if_expr_contains expr
+         | Tfunction_cases { fc_cases = cases; _ } -> found_if_case_contains cases)
+      | Texp_match (_, _, cases, _) -> found_if_case_contains cases
       | Texp_try (_, cases) -> found_if_case_contains cases
       | _ -> ())
   in
@@ -111,7 +114,7 @@ let free (expr : Typedtree.expression) =
   let idents = ref [] in
   let expr_iter (iter : I.iterator) (expr : Typedtree.expression) =
     match expr.exp_desc with
-    | Texp_ident (path, { txt = ident; _ }, _) -> idents := (ident, path) :: !idents
+    | Texp_ident (path, { txt = ident; _ }, _, _, _) -> idents := (ident, path) :: !idents
     | _ ->
       I.default_iterator.expr iter expr;
       (* if a variable was bound but is no longer, it must be associated with a
