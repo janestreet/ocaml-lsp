@@ -160,7 +160,7 @@ end = struct
     let pat_iter (type k) (iter : I.iterator) (pat : k Typedtree.general_pattern) =
       match pat.pat_desc with
       | Tpat_var (id, { loc; _ }, _, _) -> paths := Loc.Map.set !paths loc (Pident id)
-      | Tpat_alias (pat, id, { loc; _ }, _, _) ->
+      | Tpat_alias (pat, id, { loc; _ }, _, _, _) ->
         paths := Loc.Map.set !paths loc (Pident id);
         I.default_iterator.pat iter pat
       | _ -> I.default_iterator.pat iter pat
@@ -244,7 +244,7 @@ let beta_reduce (paths : Paths.t) (app : Parsetree.expression) =
     |> Option.List.all
   in
   match app.pexp_desc with
-  | Pexp_apply ({ pexp_desc = Pexp_function (params, None, Pfunction_body body); _ }, args)
+  | Pexp_apply ({ pexp_desc = Pexp_function (params, _, Pfunction_body body); _ }, args)
     when List.length params = List.length args && all_unlabeled_params params ->
     (match extract_param_pats params with
      | Some pats ->

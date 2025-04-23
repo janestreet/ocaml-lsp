@@ -13,7 +13,7 @@ let can_be_hole s = String.equal syntax_repr s
    Ideally, merlin should return a callback [option], which is [Some] when the
    context is applicable. *)
 let is_a_hole = function
-  | (_, Browse_raw.Module_expr { mod_desc = Tmod_hole; _ }) :: (_, _) :: _
-  | (_, Browse_raw.Expression { exp_desc = Texp_hole; _ }) :: _ -> true
+  | (_, Browse_raw.Module_expr { mod_desc = Tmod_typed_hole; _ }) :: (_, _) :: _
+  | (_, Browse_raw.Expression { exp_desc = Texp_typed_hole; _ }) :: _ -> true
   | [] | (_, _) :: _ -> false
 ;;

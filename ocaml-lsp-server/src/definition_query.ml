@@ -38,8 +38,8 @@ let run kind (state : State.t) uri position =
     let command, name =
       let pos = Position.logical position in
       match kind with
-      | `Definition -> Query_protocol.Locate (None, `ML, pos), "definition"
-      | `Declaration -> Query_protocol.Locate (None, `MLI, pos), "declaration"
+      | `Definition -> Query_protocol.Locate (None, `ML, pos, None), "definition"
+      | `Declaration -> Query_protocol.Locate (None, `MLI, pos, None), "declaration"
       | `Type_definition -> Query_protocol.Locate_type pos, "type definition"
     in
     let* result = Document.Merlin.dispatch_exn ~name doc command in

@@ -383,13 +383,13 @@ end = struct
         lident name (Token_type.of_builtin Type) ();
         `Custom_iterator
       | Ptyp_poly (tps, ct) ->
-        List.iter tps ~f:(fun (tp : _ Asttypes.loc) ->
+        List.iter tps ~f:(fun ((tp : _ Asttypes.loc), _) ->
           add_token tp.loc (Token_type.of_builtin TypeParameter) Token_modifiers_set.empty);
         self.typ self ct;
         `Custom_iterator
-      | Ptyp_any -> `Custom_iterator
+      | Ptyp_any _ -> `Custom_iterator
       | Ptyp_variant (_, _, _)
-      | Ptyp_alias (_, _)
+      | Ptyp_alias (_, _, _)
       | Ptyp_arrow _ | Ptyp_extension _ | Ptyp_package _ | Ptyp_object _
       | Ptyp_open (_, _)
       | Ptyp_tuple _ | Ptyp_unboxed_tuple _ -> `Default_iterator
@@ -408,7 +408,7 @@ end = struct
       pcd_name.loc
       (Token_type.of_builtin EnumMember)
       (Token_modifiers_set.singleton Declaration);
-    List.iter pcd_vars ~f:(fun (var : _ Asttypes.loc) ->
+    List.iter pcd_vars ~f:(fun ((var : _ Asttypes.loc), _) ->
       add_token var.loc (Token_type.of_builtin TypeParameter) Token_modifiers_set.empty);
     constructor_arguments self pcd_args;
     Option.iter pcd_res ~f:(fun ct -> self.typ self ct);
@@ -496,7 +496,7 @@ end = struct
       (match ptype_kind with
        | Parsetree.Ptype_abstract | Ptype_open -> Token_type.of_builtin Type
        | Ptype_variant _ -> Token_type.of_builtin Enum
-       | Ptype_record _ -> Token_type.of_builtin Struct)
+       | Ptype_record _ | Ptype_record_unboxed_product _ -> Token_type.of_builtin Struct)
       (Token_modifiers_set.singleton Declaration);
     List.iter ptype_cstrs ~f:(fun (ct0, ct1, (_ : Loc.t)) ->
       self.typ self ct0;
@@ -506,13 +506,15 @@ end = struct
      | Parsetree.Ptype_abstract | Parsetree.Ptype_open -> ()
      | Ptype_variant cds ->
        List.iter cds ~f:(fun cd -> self.constructor_declaration self cd)
-     | Ptype_record lds -> List.iter lds ~f:(fun ld -> self.label_declaration self ld));
+     | Ptype_record lds | Ptype_record_unboxed_product lds  -> List.iter lds ~f:(fun ld -> self.label_declaration self ld));
     self.attributes self ptype_attributes
   ;;
 
   let const loc (constant : Parsetree.constant) =
     match constant with
-    | Parsetree.Pconst_integer _ | Pconst_float _ ->
+    | Parsetree.Pconst_integer _ | Pconst_float _
+    | Pconst_unboxed_integer (_, _)
+    | Pconst_unboxed_float (_, _) ->
       add_token loc (Token_type.of_builtin Number) Token_modifiers_set.empty
     | Pconst_char _ | Pconst_string _ -> ()
   ;;
@@ -593,8 +595,8 @@ end = struct
                  self.pat self pat;
                  self.expr self e)));
         (* handles type constraints like [let f () : ty = ...] *)
-        Option.iter constraint_ ~f:(fun constraint_ ->
-          match constraint_.type_constraint with
+        Option.iter constraint_.ret_type_constraint ~f:(fun constraint_ ->
+          match constraint_ with
           | Pconstraint ct -> self.typ self ct
           | Pcoerce (ct1, ct2) ->
             Option.iter ct1 ~f:(self.typ self);
@@ -635,7 +637,7 @@ end = struct
       | Pexp_new l ->
         lident l (Token_type.of_builtin Class) ();
         `Custom_iterator
-      | Pexp_newtype (t, e) ->
+      | Pexp_newtype (t, _, e) ->
         add_token t.loc (Token_type.of_builtin TypeParameter) Token_modifiers_set.empty;
         self.expr self e;
         `Custom_iterator
@@ -771,19 +773,24 @@ end = struct
       | Pmod_functor (fp, me) ->
         (match fp with
          | Unit -> ()
-         | Named (n, mt) ->
-           add_token n.loc Token_type.module_ Token_modifiers_set.empty;
-           self.module_type self mt);
+         | Named (n, mt, modes) ->
+            add_token n.loc Token_type.module_ Token_modifiers_set.empty;
+            self.module_type self mt;
+            self.modes self modes);
         self.module_expr self me;
         `Custom_iterator
-      | Pmod_constraint (me, mt) ->
-        if Loc.compare me.pmod_loc mt.pmty_loc > 0
-        then (
-          self.module_type self mt;
-          self.module_expr self me)
-        else (
-          self.module_expr self me;
-          self.module_type self mt);
+      | Pmod_constraint (me, mt, modes) ->
+        (match mt with
+          | Some mt ->
+            if Loc.compare me.pmod_loc mt.pmty_loc > 0
+            then (
+              self.module_type self mt;
+              self.module_expr self me)
+            else (
+              self.module_expr self me;
+              self.module_type self mt)
+          | None -> self.module_expr self me);
+        self.modes self modes;
         `Custom_iterator
       | Pmod_extension _ -> `Custom_iterator
       | _ ->
@@ -825,11 +832,11 @@ end = struct
        | Ptyp_extension _
        | Ptyp_constr (_, _)
        | Ptyp_object (_, _)
-       | Ptyp_alias (_, _)
+       | Ptyp_alias (_, _, _)
        | Ptyp_variant (_, _, _)
        | Ptyp_poly (_, _)
        | Ptyp_open (_, _)
-       | Ptyp_tuple _ | Ptyp_unboxed_tuple _ | Ptyp_any | Ptyp_var _ ->
+       | Ptyp_tuple _ | Ptyp_unboxed_tuple _ | Ptyp_any _ | Ptyp_var _ ->
          Token_type.of_builtin Variable)
       (Token_modifiers_set.singleton Declaration);
     self.typ self pval_type;
@@ -852,19 +859,21 @@ end = struct
       | Pmty_ident l ->
         lident l Token_type.module_type ();
         `Custom_iterator
-      | Pmty_functor (fp, mt) ->
+      | Pmty_functor (fp, mt, functor_modes) ->
         (match fp with
-         | Unit -> ()
-         | Named (n, mt) ->
-           add_token n.loc Token_type.module_ Token_modifiers_set.empty;
-           self.module_type self mt);
+          | Unit -> ()
+          | Named (n, mt, fp_modes) ->
+            add_token n.loc Token_type.module_ Token_modifiers_set.empty;
+            self.module_type self mt;
+            self.modes self fp_modes);
         self.module_type self mt;
+        self.modes self functor_modes;
         `Custom_iterator
       | Pmty_alias m ->
         lident m Token_type.module_ ();
         `Custom_iterator
       | Pmty_signature sis ->
-        List.iter sis ~f:(fun si -> self.signature_item self si);
+        List.iter sis.psg_items ~f:(fun si -> self.signature_item self si);
         `Custom_iterator
       | Pmty_with (_, _) | Pmty_typeof _ | Pmty_extension _ -> `Default_iterator
     with

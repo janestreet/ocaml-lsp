@@ -407,7 +407,14 @@ let typedef_attribute_hover
       | [], [] -> None
       | signature, [] ->
         ignore (Format.flush_str_formatter ());
-        Pprintast.signature Format.str_formatter (List.rev signature);
+        let modalities =
+          match ppx_parsetree with
+          | `Interface (signature : Parsetree.signature) -> signature.psg_modalities
+          | `Implementation _ -> []
+        in
+        Pprintast.signature
+          Format.str_formatter
+          (Ast_helper.Sg.mk ~modalities (List.rev signature));
         Some (Format.flush_str_formatter ())
       | [], structure -> Some (Pprintast.string_of_structure (List.rev structure))
       | _ :: _, _ :: _ ->
