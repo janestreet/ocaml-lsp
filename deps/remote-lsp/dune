@@ -1,0 +1,11 @@
+(rule
+ (target ocaml_lsp_remote_lsp.ml)
+ (deps ocaml_lsp_remote_lsp.oss-specific.ml)
+ (action
+  (copy ocaml_lsp_remote_lsp.oss-specific.ml %{target})))
+
+(library
+ (name ocaml_lsp_remote_lsp)
+ (modules ocaml_lsp_remote_lsp)
+ (libraries core ocaml_lsp_fiber lsp lsp_json_rpc_types file_path ocaml_lsp_logging ocaml_lsp_uri stage)
+ (flags (:standard -open Lsp_json_rpc_types -alert -private_lsp_library)))

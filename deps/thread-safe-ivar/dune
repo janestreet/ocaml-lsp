@@ -1,0 +1,10 @@
+(rule
+ (target ocaml_lsp_thread_safe_ivar.ml)
+ (deps ocaml_lsp_thread_safe_ivar.oss-specific.ml)
+ (action
+  (copy %{dep:ocaml_lsp_thread_safe_ivar.oss-specific.ml} %{target})))
+
+(library
+ (name ocaml_lsp_thread_safe_ivar)
+ (modules ocaml_lsp_thread_safe_ivar)
+ (libraries threads))

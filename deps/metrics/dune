@@ -1,0 +1,10 @@
+(rule
+ (target ocaml_lsp_metrics.ml)
+ (deps ocaml_lsp_metrics.oss-specific.ml)
+ (action
+  (copy %{dep:ocaml_lsp_metrics.oss-specific.ml} %{target})))
+
+(library
+ (name ocaml_lsp_metrics)
+ (modules ocaml_lsp_metrics)
+ (libraries core ocaml_lsp_fiber))

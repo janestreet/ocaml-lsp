@@ -1,0 +1,6 @@
+(library
+ (name jsonrpc_fiber_tests)
+ (libraries base fiber_test ocaml_lsp_fiber jsonrpc_fiber lsp_json_rpc_types yojson)
+ (inline_tests)
+ (flags (:standard -open Lsp_json_rpc_types -alert -private_lsp_library))
+ (preprocess (pps ppx_expect -expect-test-strict-indentation=false)))

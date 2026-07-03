@@ -1,0 +1,10 @@
+(rule
+ (target ocaml_lsp_logging.ml)
+ (deps ocaml_lsp_logging.oss-specific.ml)
+ (action
+  (copy %{dep:ocaml_lsp_logging.oss-specific.ml} %{target})))
+
+(library
+ (name ocaml_lsp_logging)
+ (modules ocaml_lsp_logging)
+ (libraries async core ocaml_lsp_fiber lsp merlin-lib.utils ocaml_lsp_logging_impl stage))

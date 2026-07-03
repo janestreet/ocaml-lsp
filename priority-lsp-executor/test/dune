@@ -1,0 +1,5 @@
+(library
+ (name priority_lsp_executor_test)
+ (libraries async core core_unix fiber_test ocaml_lsp_fiber lev_fiber_async ocaml_lsp_fiber_shims priority_lsp_executor_lib ocaml_lsp_stdune)
+ (inline_tests)
+ (preprocess (pps ppx_let ppx_expect -expect-test-strict-indentation=false ppx_string)))

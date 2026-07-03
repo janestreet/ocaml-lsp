@@ -1,0 +1,4 @@
+(library
+ (name ocaml_lsp_fiber_shims)
+ (libraries async core ocaml_lsp_fiber ocaml_lsp_stdune)
+ (preprocess (pps ppx_let)))

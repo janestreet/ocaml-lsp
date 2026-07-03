@@ -1,0 +1,10 @@
+(rule
+ (target ocaml_lsp_lrgrep_shim.ml)
+ (deps ocaml_lsp_lrgrep_shim.oss-specific.ml)
+ (action
+  (copy %{dep:ocaml_lsp_lrgrep_shim.oss-specific.ml} %{target})))
+
+(library
+ (name ocaml_lsp_lrgrep_shim)
+ (modules ocaml_lsp_lrgrep_shim)
+ (libraries compiler-libs.common))

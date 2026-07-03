@@ -1,0 +1,5 @@
+(library
+ (name jsonrpc_tests)
+ (libraries core lsp_json_rpc_types yojson)
+ (inline_tests)
+ (preprocess (pps ppx_jane)))

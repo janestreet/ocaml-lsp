@@ -1,0 +1,10 @@
+(library
+ (name ocaml_lsp_tests)
+ (modules (:standard \ run_test_e2e))
+ (libraries core lsp ocaml_lsp_server)
+ (inline_tests)
+ (preprocess (pps ppx_expect)))
+
+(executable
+ (name run_test_e2e)
+ (modules run_test_e2e))

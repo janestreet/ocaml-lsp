@@ -1,0 +1,4 @@
+(library
+ (name priority_lsp_executor_lib)
+ (libraries async core ocaml_lsp_fiber lev_fiber_async ocaml_lsp_logging ocaml_lsp_stdune)
+ (preprocess (pps ppx_let ppx_sexp_message)))

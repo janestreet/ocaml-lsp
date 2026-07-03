@@ -1,0 +1,250 @@
+open! Import
+open Fiber.O
+
+type server = Server : 'a Server.t Fdecl.t -> server
+
+type semantic_tokens_cache =
+  { resultId : string
+  ; tokens : int array
+  }
+
+(** The following code attempts to resolve the issue of displaying code actions for
+    unopened document.
+
+    Unopened documents require a dynamic registration (DR) for code actions, while open
+    documents do not.
+
+    Here are the four states of the documents and the DR status they require. "X" marks
+    that DR is required while "O" marks that no Dr should be present
+
+    {v
+                          | Open | Closed |
+                          -----------------
+      Promotions Pending  |  O   |   X    |
+      No Promotions       |  O   |   O    |
+    v}
+
+    From the above, we see that we need to unregister when transitioning from X to O and
+    to register while transitioning from O to X. *)
+
+type doc =
+  { document : Document.t option
+  (** Invariant: if [document <> None], then no promotions are active *)
+  ; promotions : int
+  (** The number of associated promotions. when this is 0, we may unsubscribe from code
+      actions *)
+  ; mutable semantic_tokens_cache : semantic_tokens_cache option
+  ; mutable last_used : Core.Time_ns.t
+  (** Timestamp of when the document was last "used". Usages include being opened,
+      modified, saved, hovered, having a code action performed, etc. This is used to
+      determine the order in which merlin diagnostics are refreshed. *)
+  }
+
+type t =
+  { db : doc ref Uri.Table.t
+  ; server : server
+  ; (* The pool is needed to run subscribe/unsubscribe requests. To prevent deadlocks with
+       synchronous responses to lsp. In the future, these deadlocks should cause runtime
+       errors or will just be impossible *)
+    pool : Fiber.Pool.t
+  }
+
+let make s pool = { db = Uri.Table.create ~size:50 (); server = Server s; pool }
+let code_action_id uri = "ocamllsp-promote/" ^ Uri.to_string uri
+let method_ = "textDocument/codeAction"
+
+let unregister_request t uris =
+  match uris with
+  | [] -> Fiber.return ()
+  | _ :: _ ->
+    let unregisterations =
+      List.map uris ~f:(fun uri ->
+        let id = code_action_id uri in
+        Unregistration.create ~id ~method_)
+    in
+    let (Server server) = t.server in
+    let server = Fdecl.get ~here:[%here] server in
+    let req = UnregistrationParams.create ~unregisterations in
+    Fiber.Pool.task t.pool ~f:(fun () ->
+      Server.request server (Server_request.ClientUnregisterCapability req))
+;;
+
+let register_request t uris =
+  match uris with
+  | [] -> Fiber.return ()
+  | _ :: _ ->
+    let registrations =
+      List.map uris ~f:(fun uri ->
+        let id = code_action_id uri in
+        let registerOptions =
+          let documentSelector =
+            [ `TextDocumentFilter
+                (TextDocumentFilter.create ~pattern:(Uri.to_path uri) ())
+            ]
+          in
+          CodeActionRegistrationOptions.create
+            ~documentSelector
+            ~codeActionKinds:[ CodeActionKind.Other "Promote" ]
+            ()
+          |> CodeActionRegistrationOptions.yojson_of_t
+        in
+        Registration.create ~id ~method_ ~registerOptions ())
+    in
+    let (Server server) = t.server in
+    let server = Fdecl.get ~here:[%here] server in
+    let req = RegistrationParams.create ~registrations in
+    Fiber.Pool.task t.pool ~f:(fun () ->
+      Server.request server (Server_request.ClientRegisterCapability req))
+;;
+
+let open_document t doc =
+  let* () = Fiber.return () in
+  let key = Document.uri doc in
+  match Hashtbl.find t.db key with
+  | None ->
+    Hashtbl.set
+      t.db
+      ~key
+      ~data:
+        (ref
+           { document = Some doc
+           ; promotions = 0
+           ; semantic_tokens_cache = None
+           ; last_used = Core.Time_ns.now ()
+           });
+    Fiber.return ()
+  | Some d ->
+    (* if there's no document, then we just opened it to track promotions.
+
+       if there's a document already, we're doing a double open and there's no need to
+       unregister. *)
+    let unregister = !d.document = None in
+    d := { !d with document = Some doc };
+    if unregister then unregister_request t [ key ] else Fiber.return ()
+;;
+
+let get_opt t uri = Hashtbl.find t.db uri |> Option.bind ~f:(fun d -> !d.document)
+
+let no_document_found uri = function
+  | Some s -> s
+  | None ->
+    Jsonrpc.Response.Error.raise
+      (Jsonrpc.Response.Error.make
+         ~code:InvalidRequest
+         ~message:(Format.asprintf "no document found with uri: %s" (Uri.to_string uri))
+         ())
+;;
+
+let get' t uri = Hashtbl.find t.db uri |> no_document_found uri
+let get t uri = !(get' t uri).document |> no_document_found uri
+
+let change_document t uri ~f =
+  let doc = get' t uri in
+  let document = f (no_document_found uri !doc.document) in
+  doc := { !doc with document = Some document };
+  document
+;;
+
+let maybe_close_doc (doc : doc) =
+  match doc.document with
+  | None -> Fiber.return ()
+  | Some d -> Document.close d
+;;
+
+let close_document t uri =
+  Fiber.of_thunk (fun () ->
+    match Hashtbl.find t.db uri with
+    | None -> Fiber.return ()
+    | Some doc ->
+      let close_doc () = maybe_close_doc !doc in
+      if !doc.promotions = 0
+      then (
+        Hashtbl.remove t.db uri;
+        close_doc ())
+      else (
+        doc := { !doc with document = None };
+        Fiber.fork_and_join_unit close_doc (fun () -> register_request t [ uri ])))
+;;
+
+let unregister_promotions t uris =
+  let* () = Fiber.return () in
+  List.filter uris ~f:(fun uri ->
+    match Hashtbl.find t.db uri with
+    | None -> false
+    | Some doc ->
+      doc := { !doc with promotions = !doc.promotions - 1 };
+      let unsubscribe = !doc.promotions = 0 in
+      if unsubscribe && !doc.document = None then Hashtbl.remove t.db uri;
+      unsubscribe)
+  |> unregister_request t
+;;
+
+let register_promotions t uris =
+  let* () = Fiber.return () in
+  let last_used = Core.Time_ns.now () in
+  List.filter uris ~f:(fun uri ->
+    match Hashtbl.find t.db uri with
+    | None ->
+      let doc =
+        ref { document = None; promotions = 0; semantic_tokens_cache = None; last_used }
+      in
+      Hashtbl.set t.db ~key:uri ~data:doc;
+      true
+    | Some doc ->
+      doc := { !doc with promotions = !doc.promotions + 1 };
+      false)
+  |> register_request t
+;;
+
+let update_semantic_tokens_cache
+  : t -> Uri.t -> resultId:string -> tokens:int array -> unit
+  =
+  fun t uri ~resultId ~tokens ->
+  let doc = get' t uri in
+  !doc.semantic_tokens_cache <- Some { resultId; tokens }
+;;
+
+let get_semantic_tokens_cache : t -> Uri.t -> semantic_tokens_cache option =
+  fun t uri ->
+  let doc = get' t uri in
+  !doc.semantic_tokens_cache
+;;
+
+let docs_to_iter ?compare ?(filter = fun _ -> true) t =
+  let docs =
+    Hashtbl.fold ~init:[] t.db ~f:(fun ~key:_ ~data:doc acc -> !doc.document :: acc)
+    |> Core.List.filter_map ~f:(function
+      | Some doc as d when filter doc -> d
+      | _ -> None)
+  in
+  match compare with
+  | None -> docs
+  | Some compare -> List.sort ~compare docs
+;;
+
+let parallel_iter ?filter t ~f = Fiber.parallel_iter (docs_to_iter ?filter t) ~f
+
+let sequential_iter ?compare ?filter t ~f =
+  Fiber.sequential_iter (docs_to_iter ?compare ?filter t) ~f
+;;
+
+let fold t ~init ~f =
+  Hashtbl.fold t.db ~init ~f:(fun ~key:_ ~data:doc acc ->
+    match !doc.document with
+    | None -> acc
+    | Some x -> f x acc)
+;;
+
+let close_all t =
+  Fiber.of_thunk (fun () ->
+    let docs = Hashtbl.fold t.db ~init:[] ~f:(fun ~key:_ ~data:doc acc -> !doc :: acc) in
+    Hashtbl.clear t.db;
+    Fiber.parallel_iter docs ~f:maybe_close_doc)
+;;
+
+let last_used t uri = Option.map (Hashtbl.find t.db uri) ~f:(fun doc -> !doc.last_used)
+
+let update_last_used t uri =
+  let now = Core.Time_ns.now () in
+  Option.iter (Hashtbl.find t.db uri) ~f:(fun doc -> !doc.last_used <- now)
+;;

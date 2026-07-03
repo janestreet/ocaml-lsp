@@ -1,0 +1,3 @@
+(library
+ (name stage)
+ (preprocess (pps ppx_enumerate ppx_sexp_conv)))

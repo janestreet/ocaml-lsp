@@ -1,0 +1,5 @@
+(library
+ (name jsonrpc_fiber)
+ (libraries base ocaml_lsp_fiber lsp_json_rpc_types  ppx_yojson_conv_lib yojson ocaml_lsp_stdune ocaml_lsp_fiber_shims)
+ (flags (:standard -open Lsp_json_rpc_types -alert -private_lsp_library))
+ (preprocess (pps ppx_sexp_message ppx_sexp_value)))

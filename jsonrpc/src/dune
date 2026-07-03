@@ -1,0 +1,4 @@
+(library
+ (name lsp_json_rpc_types)
+
+ (libraries core yojson))

@@ -1,0 +1,3 @@
+(library
+ (name fiber_test)
+ (libraries base ocaml_lsp_fiber ocaml_lsp_stdune ocaml_lsp_fiber_shims))
