@@ -5,6 +5,8 @@ let priority = Priorities.code_action
 
 let unused = ()
 
+let another_unused = ()
+
 let make_construct_action ~state ~doc loc newText =
   let title = [%string "Construct: %{newText}"] in
   let kind = CodeActionKind.Other "construct" in
