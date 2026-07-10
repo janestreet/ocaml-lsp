@@ -4,6 +4,10 @@ module Id = Jsonrpc.Id
 module Response = Jsonrpc.Response
 module Session = Jsonrpc_fiber.Make (Fiber_io)
 
+module Notify = struct
+  type t = Jsonrpc_fiber.Notify.Work.t
+end
+
 module Reply = struct
   type 'r t =
     | Now of 'r
@@ -13,7 +17,7 @@ module Reply = struct
   let later f = Later f
 end
 
-let cancel_token = Fiber.Var.create ()
+let cancel_token = Ocaml_lsp_fiber_shims.Var_optional.create_none ()
 
 module State = struct
   type t =
@@ -33,14 +37,24 @@ module type S = sig
     type 'a session := 'a t
 
     type 'state on_request =
-      { on_request : 'a. 'state session -> 'a in_request -> ('a Reply.t * 'state) Fiber.t
+      { on_request :
+          'a.
+          'state session
+          -> 'a in_request
+          -> request_time:Time_ns.t option
+          -> event_index:int option
+          -> ('a Reply.t * 'state) Fiber.t
       }
 
     type 'state t
 
     val make
       :  ?on_request:'state on_request
-      -> ?on_notification:('state session -> in_notification -> 'state Fiber.t)
+      -> ?on_notification:
+           ('state session
+            -> in_notification
+            -> event_index:int option
+            -> ('state * Notify.t option) Fiber.t)
       -> unit
       -> 'state t
   end
@@ -102,8 +116,7 @@ struct
 
   type 'state t =
     { io : Fiber_io.t
-    ; (* mutable only to initialiaze this record *)
-      mutable session : 'state Session.t Fdecl.t
+    ; session : 'state Session.t Fdecl.t
     ; (* Internal state of the session *)
       mutable state : State.t
     ; (* Filled when the server is initialied *)
@@ -114,33 +127,56 @@ struct
     }
 
   and 'state on_request =
-    { on_request : 'a. 'state t -> 'a in_request -> ('a Reply.t * 'state) Fiber.t }
+    { on_request :
+        'a.
+        'state t
+        -> 'a in_request
+        -> request_time:Time_ns.t option
+        -> event_index:int option
+        -> ('a Reply.t * 'state) Fiber.t
+    }
 
   and 'state handler =
     { h_on_request : 'state on_request
-    ; h_on_notification : 'state t -> In_notification.t -> 'state Fiber.t
+    ; h_on_notification :
+        'state t
+        -> In_notification.t
+        -> event_index:int option
+        -> ('state * Notify.t option) Fiber.t
     }
 
   module Handler = struct
     type nonrec 'state on_request = 'state on_request =
-      { on_request : 'a. 'state t -> 'a in_request -> ('a Reply.t * 'state) Fiber.t }
+      { on_request :
+          'a.
+          'state t
+          -> 'a in_request
+          -> request_time:Time_ns.t option
+          -> event_index:int option
+          -> ('a Reply.t * 'state) Fiber.t
+      }
 
     type nonrec 'state t = 'state handler =
       { h_on_request : 'state on_request
-      ; h_on_notification : 'state t -> In_notification.t -> 'state Fiber.t
+      ; h_on_notification :
+          'state t
+          -> In_notification.t
+          -> event_index:int option
+          -> ('state * Notify.t option) Fiber.t
       }
 
-    let on_notification_default _ notification =
+    let on_notification_default _ notification ~event_index:_ =
       Format.eprintf "dropped notification@.%!";
       let notification = In_notification.to_jsonrpc notification in
-      Code_error.raise
-        "unexpected notification"
-        [ "notification", Json.to_dyn (Jsonrpc.Notification.yojson_of_t notification) ]
+      Code_error.raise_s
+        [%message
+          "unexpected notification"
+            ~notification:(Json.to_string (Jsonrpc.Notification.yojson_of_t notification))]
     ;;
 
     let on_request_default =
       { on_request =
-          (fun _ _ ->
+          (fun _ _ ~request_time:_ ~event_index:_ ->
             Jsonrpc.Response.Error.make ~code:InternalError ~message:"Not supported" ()
             |> Jsonrpc.Response.Error.raise)
       }
@@ -155,12 +191,13 @@ struct
     ;;
   end
 
-  let state t = Session.state (Fdecl.get t.session)
+  let state t = Session.state (Fdecl.get ~here:[%here] t.session)
 
   let to_jsonrpc (type state) (t : state t) h_on_request h_on_notification =
     let on_request (ctx : (state, Jsonrpc.Request.t) Session.Context.t) =
       let req = Session.Context.message ctx in
       let state = Session.Context.state ctx in
+      let { Jsonrpc.Request.request_time; event_index; _ } = req in
       match In_request.of_jsonrpc req with
       | Error message ->
         let code = Jsonrpc.Response.Error.Code.InvalidParams in
@@ -170,15 +207,15 @@ struct
         let cancel = Fiber.Cancel.create () in
         let remove = lazy (Table.remove t.pending req.id) in
         let+ response, state =
-          Fiber.with_error_handler
-            ~on_error:
-              (Stdune.Exn_with_backtrace.map_and_reraise ~f:(fun exn ->
-                 Lazy.force remove;
-                 exn))
+          Ocaml_lsp_fiber_shims.with_error_handler
+            ~on_error:(fun exn ->
+              Ocaml_lsp_stdune.Exn_with_backtrace.map_and_reraise exn ~f:(fun exn ->
+                Lazy.force remove;
+                exn))
             (fun () ->
-              Fiber.Var.set cancel_token cancel (fun () ->
+              Ocaml_lsp_fiber_shims.Var_optional.set cancel_token (Some cancel) (fun () ->
                 Table.replace t.pending req.id cancel;
-                h_on_request.on_request t r))
+                h_on_request.on_request t r ~request_time ~event_index))
         in
         let to_response x =
           Jsonrpc.Response.ok req.id (In_request.yojson_of_result r x)
@@ -192,8 +229,10 @@ struct
             let f send =
               Fiber.finalize
                 (fun () ->
-                  Fiber.Var.set cancel_token cancel (fun () ->
-                    k (fun r -> send (to_response r))))
+                  Ocaml_lsp_fiber_shims.Var_optional.set
+                    cancel_token
+                    (Some cancel)
+                    (fun () -> k (fun r -> send (to_response r))))
                 ~finally:(fun () ->
                   Lazy.force remove;
                   Fiber.return ())
@@ -204,13 +243,14 @@ struct
     in
     let on_notification ctx =
       let r = Session.Context.message ctx in
+      let { Jsonrpc.Notification.event_index; _ } = r in
       match In_notification.of_jsonrpc r with
-      | Ok r -> h_on_notification t r
+      | Ok r -> h_on_notification t r ~event_index
       | Error error ->
         Log.log ~section:"lsp" (fun () ->
           Log.msg "Invalid notification" [ "error", `String error ]);
         let state = Session.Context.state ctx in
-        Fiber.return (Jsonrpc_fiber.Notify.Continue, state)
+        Fiber.return (Jsonrpc_fiber.Notify.Continue None, state)
     in
     on_request, on_notification
   ;;
@@ -219,7 +259,7 @@ struct
     let t =
       { io
       ; state = Waiting_for_init
-      ; session = Fdecl.create Dyn.opaque
+      ; session = Fdecl.create (fun _ -> Atom "<opaque>")
       ; initialized = Fiber.Ivar.create ()
       ; req_id = 1
       ; pending = Table.create 32
@@ -250,7 +290,7 @@ struct
     Fiber.of_thunk (fun () ->
       let+ resp =
         let req = create_request t req in
-        Session.request (Fdecl.get t.session) req
+        Session.request (Fdecl.get ~here:[%here] t.session) req
       in
       receive_response req resp)
   ;;
@@ -265,7 +305,7 @@ struct
         cancel
         ~on_cancel:(fun () -> on_cancel jsonrpc_req.id)
         (fun () ->
-          let+ resp = Session.request (Fdecl.get t.session) jsonrpc_req in
+          let+ resp = Session.request (Fdecl.get ~here:[%here] t.session) jsonrpc_req in
           match resp.result with
           | Error { code = RequestCancelled; _ } -> `Cancelled
           | Ok _ when Fiber.Cancel.fired cancel -> `Cancelled
@@ -282,7 +322,7 @@ struct
 
   let notification (t : _ t) (n : Out_notification.t) : unit Fiber.t =
     let jsonrpc_request = Out_notification.to_jsonrpc n in
-    Session.notification (Fdecl.get t.session) jsonrpc_request
+    Session.notification (Fdecl.get ~here:[%here] t.session) jsonrpc_request
   ;;
 
   module Batch = struct
@@ -316,7 +356,7 @@ struct
     ;;
 
     let submit { session = E session; batch } =
-      let t = Fdecl.get session.session in
+      let t = Fdecl.get ~here:[%here] session.session in
       Session.submit t batch
     ;;
   end
@@ -324,15 +364,15 @@ struct
   let initialized t = Fiber.Ivar.read t.initialized
 
   let stop t =
-    let+ () = Session.stop (Fdecl.get t.session) in
+    let+ () = Session.stop (Fdecl.get ~here:[%here] t.session) in
     t.state <- Closed
   ;;
 
   let start_loop t =
     Fiber.fork_and_join_unit
       (fun () ->
-        let* () = Session.run (Fdecl.get t.session) in
-        Fiber.Pool.stop t.detached)
+        let* () = Session.run (Fdecl.get ~here:[%here] t.session) in
+        Ocaml_lsp_fiber_shims.close_fiber_pool t.detached)
       (fun () -> Fiber.Pool.run t.detached)
   ;;
 
@@ -342,10 +382,10 @@ struct
       | None -> Fiber.return ()
       | Some token -> Fiber.Pool.task t.detached ~f:(fun () -> Fiber.Cancel.fire token)
     in
-    Jsonrpc_fiber.Notify.Continue, state t
+    Jsonrpc_fiber.Notify.Continue None, state t
   ;;
 
-  let cancel_token () = Fiber.Var.get cancel_token
+  let cancel_token () = Ocaml_lsp_fiber_shims.Var_optional.get cancel_token
 end
 
 module Client = struct
@@ -355,12 +395,12 @@ module Client = struct
     Make (InitializeResult) (Client_request) (Client_notification) (Server_request)
       (Server_notification)
 
-  let h_on_notification handler t n =
+  let h_on_notification handler t n ~event_index =
     match n with
     | Server_notification.CancelRequest id -> handle_cancel_req t id
     | _ ->
-      let+ res = handler.h_on_notification t n in
-      Jsonrpc_fiber.Notify.Continue, res
+      let+ state, maybe_action = handler.h_on_notification t n ~event_index in
+      Jsonrpc_fiber.Notify.Continue maybe_action, state
   ;;
 
   let make handler io =
@@ -396,7 +436,7 @@ module Server = struct
     Make (InitializeParams) (Server_request) (Server_notification) (Client_request)
       (Client_notification)
 
-  let h_on_notification handler t n =
+  let h_on_notification handler t n ~event_index =
     Fiber.of_thunk (fun () ->
       match n with
       | Client_notification.Exit ->
@@ -408,21 +448,22 @@ module Server = struct
         if t.state = Waiting_for_init
         then (
           let state = state t in
-          Fiber.return (Jsonrpc_fiber.Notify.Continue, state))
+          Fiber.return (Jsonrpc_fiber.Notify.Continue None, state))
         else
-          let+ state = handler.h_on_notification t n in
-          Jsonrpc_fiber.Notify.Continue, state)
+          let+ state, maybe_action = handler.h_on_notification t n ~event_index in
+          Jsonrpc_fiber.Notify.Continue maybe_action, state)
   ;;
 
-  let on_request handler t in_r =
+  let on_request handler t in_r ~request_time ~event_index =
     Fiber.of_thunk (fun () ->
       match Client_request.E in_r with
       | Client_request.E (Client_request.Initialize i) ->
         if t.state = Waiting_for_init
         then (
-          let* result = handler.h_on_request.on_request t in_r in
+          let* result =
+            handler.h_on_request.on_request t in_r ~request_time ~event_index
+          in
           t.state <- Running;
-          (* XXX Should we wait for the waiter of initialized to finish? *)
           let* () = Fiber.Ivar.fill t.initialized i in
           Fiber.return result)
         else (
@@ -435,12 +476,15 @@ module Server = struct
           let code = Response.Error.Code.ServerNotInitialized in
           let message = "not initialized" in
           raise (Jsonrpc.Response.Error.E (Jsonrpc.Response.Error.make ~code ~message ())))
-        else handler.h_on_request.on_request t in_r)
+        else handler.h_on_request.on_request t in_r ~request_time ~event_index)
   ;;
 
   let make (type s) (handler : s Handler.t) io (initial_state : s) =
     let h_on_request : _ Handler.on_request =
-      { Handler.on_request = (fun t x -> on_request handler t x) }
+      { Handler.on_request =
+          (fun t x ~request_time ~event_index ->
+            on_request handler t x ~request_time ~event_index)
+      }
     in
     let h_on_notification = h_on_notification handler in
     make ~name:"server" h_on_request h_on_notification io initial_state

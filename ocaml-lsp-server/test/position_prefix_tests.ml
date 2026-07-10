@@ -1,10 +1,9 @@
 open Ocaml_lsp_server
 
-(** An extensive set of tests to validation that the prefix_op_position function
-    correctly returns prefixes merlin is happy with for all the odd ocaml syntax
-    that exists *)
+(** An extensive set of tests to validation that the prefix_op_position function correctly
+    returns prefixes merlin is happy with for all the odd ocaml syntax that exists *)
 
-let prefix_test ?(short_path = false) document position =
+let prefix_test ?(short_path = `None) document position =
   let document_source = Testing.Merlin_kernel.Msource.make document in
   let prefix = Testing.Compl.prefix_of_position ~short_path document_source position in
   Printf.printf "%s " prefix
@@ -71,7 +70,7 @@ let%expect_test "completion prefix with space test" =
 ;;
 
 let%expect_test "short path prefix" =
-  prefix_test ~short_path:true "[1;2] |> Core.List.ma\n" (`Logical (1, 22));
+  prefix_test ~short_path:`Suffix "[1;2] |> Core.List.ma\n" (`Logical (1, 22));
   [%expect "ma"]
 ;;
 

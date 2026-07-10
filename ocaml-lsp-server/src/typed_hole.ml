@@ -21,9 +21,9 @@ let next_hole ~(holes : Range.t list) ~(cursor : Position.t) =
   (* Find the first hole after the cursor, or default to the first *)
   let hole =
     List.find holes ~f:(fun hole ->
-      match Position.compare hole.start cursor with
-      | Lt | Eq -> false
-      | Gt -> true)
+      match Ordering.of_int (Position.compare hole.start cursor) with
+      | Less | Equal -> false
+      | Greater -> true)
   in
   match hole with
   | None -> List.hd holes
@@ -37,9 +37,9 @@ let prev_hole ~(holes : Range.t list) ~(cursor : Position.t) =
       holes
       ~init:None
       ~f:(fun prev_hole hole ->
-        match Position.compare hole.end_ cursor with
-        | Lt -> Continue (Some hole)
-        | Gt | Eq -> Stop prev_hole)
+        match Ordering.of_int (Position.compare hole.end_ cursor) with
+        | Less -> Continue (Some hole)
+        | Greater | Equal -> Stop prev_hole)
       ~finish:Fn.id
   in
   match hole with

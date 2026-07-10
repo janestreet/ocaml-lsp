@@ -16,8 +16,8 @@ let check_typeable_context pipeline pos_start =
     | _ -> None
   in
   let is_valid loc p extras =
-    (* Constrains are listed from the farthest to the closest. We search
-       reversed list to find the closest type annotation to remove. *)
+    (* Constrains are listed from the farthest to the closest. We search reversed list to
+       find the closest type annotation to remove. *)
     match extras |> List.rev |> List.find_map ~f:p with
     | Some x -> `Valid (loc, x)
     | None -> `Invalid
@@ -56,7 +56,7 @@ let code_action_of_type_enclosing uri doc (loc, constr_loc) =
     let edit = TextDocumentEdit.create ~textDocument ~edits:[ `TextEdit textedit ] in
     WorkspaceEdit.create ~documentChanges:[ `TextDocumentEdit edit ] ()
   in
-  let title = String.capitalize_ascii action_kind in
+  let title = String.capitalize action_kind in
   CodeAction.create
     ~title
     ~kind:(CodeActionKind.Other action_kind)

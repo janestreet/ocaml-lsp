@@ -41,6 +41,15 @@ module Id : sig
   val equal : t -> t -> bool
 end
 
+module Request_time : sig
+  type t = Core.Time_ns.t
+
+  include Json.Jsonable.S with type t := t
+
+  val hash : t -> int
+  val equal : t -> t -> bool
+end
+
 module Structured : sig
   type t =
     [ `Assoc of (string * Json.t) list
@@ -48,12 +57,20 @@ module Structured : sig
     ]
 
   include Json.Jsonable.S with type t := t
+
+  val of_string : string -> t
+  val to_string : t -> string
+  val update_json_structured : key:string -> modify_value:(string -> string) -> t -> t
 end
 
 module Notification : sig
   type t =
     { method_ : string
     ; params : Structured.t option
+    ; event_index : int option
+    (** Optional monotonic index identifying this notification in a session. If present,
+        this is injected by [ocaml-lsp-wrapper]. When absent, [ocaml-lsp-server] generates
+        its own. *)
     }
 
   val create : ?params:Structured.t -> method_:string -> unit -> t
@@ -65,6 +82,11 @@ module Request : sig
     { id : Id.t
     ; method_ : string
     ; params : Structured.t option
+    ; request_time : Request_time.t option
+    ; event_index : int option
+    (** Optional monotonic index identifying this request in a session. If present, this
+        is injected by [ocaml-lsp-wrapper]. When absent, [ocaml-lsp-server] generates its
+        own. *)
     }
 
   val create : ?params:Structured.t -> id:Id.t -> method_:string -> unit -> t

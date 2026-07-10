@@ -1,5 +1,8 @@
 open Import
 open Fiber.O
+module Fiber_extensions = Ocaml_lsp_fiber_shims
+
+let priority = Priorities.code_action
 
 module Code_action_error = struct
   type t =
@@ -17,12 +20,6 @@ module Code_action_error = struct
     | _, Exn _ -> y
     | Need_merlin_extend _, Need_merlin_extend _ -> y
   ;;
-end
-
-module Code_action_error_monoid = struct
-  type t = Code_action_error.t
-
-  include Stdune.Monoid.Make (Code_action_error)
 end
 
 let compute_ocaml_code_actions ~log_info (params : CodeActionParams.t) state doc =
@@ -50,14 +47,15 @@ let compute_ocaml_code_actions ~log_info (params : CodeActionParams.t) state doc
       ; Action_inline.t
       ; Action_extract.local
       ; Action_extract.function_
+      ; Action_wrap_type_in_module.t
       ]
   in
   let batchable, non_batchable =
     List.partition_map
       ~f:(fun ca ->
         match ca.run with
-        | `Batchable f -> Left f
-        | `Non_batchable f -> Right f)
+        | `Batchable f -> First f
+        | `Non_batchable f -> Second f)
       enabled_actions
   in
   let* batch_results =
@@ -66,6 +64,7 @@ let compute_ocaml_code_actions ~log_info (params : CodeActionParams.t) state doc
     else
       Document.Merlin.with_pipeline_exn
         ~log_info
+        ~priority
         (Document.merlin_exn doc)
         (fun pipeline ->
            List.filter_map batchable ~f:(fun ca ->
@@ -74,13 +73,13 @@ let compute_ocaml_code_actions ~log_info (params : CodeActionParams.t) state doc
   in
   let code_action ca =
     let+ res =
-      Fiber.map_reduce_errors
-        ~on_error:(fun (exn : Exn_with_backtrace.t) ->
+      Fiber_extensions.map_reduce_errors_with_monoid
+        (module Code_action_error)
+        ~on_error:(fun exn ->
           match exn.exn with
           | Merlin_extend.Extend_main.Handshake.Error error ->
             Fiber.return (Code_action_error.Need_merlin_extend error)
           | _ -> Fiber.return (Code_action_error.Exn exn))
-        (module Code_action_error_monoid)
         (fun () -> ca ~log_info doc params)
     in
     match res with

@@ -1,3 +1,4 @@
+module Fiber = Ocaml_lsp_fiber
 open Test.Import
 
 (** Opens a document with the language server. This must be done before trying to access
@@ -18,12 +19,16 @@ val iter_lsp_response
   -> ('a -> unit)
   -> unit Async.Deferred.t
 
-(* Opens the file in the specified path with source code as specified in src.
-   This then waits for merlin to send diagnostic info and callls the diagnostics_callback
-   function with the diagnostics it receives from merlin for the source. *)
+(** Opens the file in the specified path with source code as specified in src. This then
+    waits for merlin to send diagnostic info and callls the diagnostics_callback function
+    with the diagnostics it receives from merlin for the source.
+
+    [cwd] and [extra_env], when provided, are forwarded to the LSP server subprocess. *)
 val open_document_with_diagnostics_callback
   :  ?prep:(unit Client.t -> unit Fiber.t)
   -> ?path:string
+  -> ?cwd:string
+  -> ?extra_env:string list
   -> source:string
   -> diagnostics_callback:(PublishDiagnosticsParams.t -> unit)
   -> unit

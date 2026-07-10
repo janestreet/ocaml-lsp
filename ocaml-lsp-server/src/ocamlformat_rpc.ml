@@ -1,4 +1,4 @@
-(* TODO: Add support for ocamlformat. *)
+module Fiber = Ocaml_lsp_fiber
 
 type t = unit
 

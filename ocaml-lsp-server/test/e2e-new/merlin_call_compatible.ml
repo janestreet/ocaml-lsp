@@ -1,3 +1,4 @@
+module Fiber = Ocaml_lsp_fiber
 open Async
 open Test.Import
 module Req = Ocaml_lsp_server.Custom_request.Merlin_call_compatible
@@ -12,7 +13,8 @@ let call_merlin_compatible client command args result_as_sexp =
     |> Option.some
   in
   let req =
-    Lsp.Client_request.UnknownRequest { meth = "ocamllsp/merlinCallCompatible"; params }
+    Lsp.Client_request.UnknownRequest
+      { meth = Lsp.Client_request.Custom_request_names.merlin_call_compatible; params }
   in
   Client.request client req
 ;;
@@ -93,7 +95,7 @@ let%expect_test "errors: warning is shown" =
     {|
     {
       "resultAsSexp": false,
-      "result": "{\"class\":\"return\",\"value\":[{\"start\":{\"line\":1,\"col\":9},\"end\":{\"line\":1,\"col\":39},\"type\":\"warning\",\"sub\":[],\"valid\":true,\"message\":\"Warning 8: this pattern-matching is not exhaustive.\\nHere is an example of a case that is not matched:\\nSome _\"}]}"
+      "result": "{\"class\":\"return\",\"value\":[{\"start\":{\"line\":1,\"col\":9},\"end\":{\"line\":1,\"col\":39},\"type\":\"warning\",\"sub\":[],\"valid\":true,\"message\":\"Warning 8: this pattern-matching is not exhaustive.\\n  Here is an example of a case that is not matched: Some _\"}]}"
     }
     |}]
 ;;

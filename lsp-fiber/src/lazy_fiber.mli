@@ -1,3 +1,5 @@
+open Import
+
 type 'a t
 
 val create : (unit -> 'a Fiber.t) -> 'a t

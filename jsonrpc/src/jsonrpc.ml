@@ -1,6 +1,7 @@
 open Import
 open Json.Conv
 module Json = Json
+module Time_ns = Core.Time_ns
 
 module Id = struct
   type t =
@@ -23,6 +24,22 @@ module Id = struct
   let equal = ( = )
 end
 
+module Request_time = struct
+  type t = Time_ns.t
+
+  let yojson_of_t t = `String (Time_ns.to_string_utc t)
+
+  let t_of_yojson = function
+    | `String s ->
+      (try Time_ns.of_string_with_utc_offset s with
+       | _ -> Json.error "Request_time.t" (`String s))
+    | json -> Json.error "Request_time.t" json
+  ;;
+
+  let hash = Time_ns.hash
+  let equal = Time_ns.equal
+end
+
 module Constant = struct
   let jsonrpc = "jsonrpc"
   let jsonrpcv = "2.0"
@@ -31,6 +48,13 @@ module Constant = struct
   let params = "params"
   let result = "result"
   let error = "error"
+
+  (* ocaml-lsp-specific field. If present, this is injected by ocaml-lsp-wrapper *)
+  let request_time = "request_time"
+
+  (* ocaml-lsp-specific field. If present, this is injected by ocaml-lsp-wrapper. When
+     absent, [ocaml-lsp-server] generates its own event_index. *)
+  let event_index = "event_index"
 end
 
 let assert_jsonrpc_version fields =
@@ -55,25 +79,47 @@ module Structured = struct
   ;;
 
   let yojson_of_t t = (t :> Json.t)
+  let of_string s = Yojson.Safe.from_string s |> t_of_yojson
+  let to_string t = yojson_of_t t |> Yojson.Safe.to_string
+
+  (** Updates any values associated with [key] in the top-level [`Assoc] of [json]. *)
+  let update_json_structured ~key ~(modify_value : string -> string) (json : t) =
+    match json with
+    | `Assoc assoc ->
+      `Assoc
+        (List.map assoc ~f:(function
+          | k, `String v when String.equal k key -> k, `String (modify_value v)
+          | k_v -> k_v))
+    | lst -> lst
+  ;;
 end
 
 module Notification = struct
   type t =
     { method_ : string
     ; params : Structured.t option
+    ; event_index : int option
     }
 
-  let fields ~method_ ~params =
+  let fields ~method_ ~params ~event_index =
     let json =
       [ Constant.method_, `String method_; Constant.jsonrpc, `String Constant.jsonrpcv ]
     in
-    match params with
+    let json =
+      match params with
+      | None -> json
+      | Some params -> (Constant.params, (params :> Json.t)) :: json
+    in
+    match event_index with
     | None -> json
-    | Some params -> (Constant.params, (params :> Json.t)) :: json
+    | Some event_index -> (Constant.event_index, `Int event_index) :: json
   ;;
 
-  let yojson_of_t { method_; params } = `Assoc (fields ~method_ ~params)
-  let create ?params ~method_ () = { params; method_ }
+  let yojson_of_t { method_; params; event_index } =
+    `Assoc (fields ~method_ ~params ~event_index)
+  ;;
+
+  let create ?params ~method_ () = { params; method_; event_index = None }
 end
 
 module Request = struct
@@ -81,14 +127,24 @@ module Request = struct
     { id : Id.t
     ; method_ : string
     ; params : Structured.t option
+    ; request_time : Request_time.t option
+    ; event_index : int option
     }
 
-  let yojson_of_t { id; method_; params } =
-    let fields = Notification.fields ~method_ ~params in
+  let yojson_of_t { id; method_; params; request_time; event_index } =
+    let fields = Notification.fields ~method_ ~params ~event_index in
+    let fields =
+      match request_time with
+      | Some request_time ->
+        (Constant.request_time, Request_time.yojson_of_t request_time) :: fields
+      | None -> fields
+    in
     `Assoc ((Constant.id, Id.yojson_of_t id) :: fields)
   ;;
 
-  let create ?params ~id ~method_ () = { params; id; method_ }
+  let create ?params ~id ~method_ () =
+    { params; id; method_; request_time = None; event_index = None }
+  ;;
 end
 
 module Response = struct
@@ -288,16 +344,25 @@ module Packet = struct
 
   let t_of_fields (fields : (string * Json.t) list) =
     assert_jsonrpc_version fields;
+    let event_index_of_yojson = function
+      | `Int i -> i
+      | json -> Json.error "event_index" json
+    in
     match Json.field fields Constant.id Id.t_of_yojson with
     | None ->
       let method_ = Json.field_exn fields Constant.method_ Json.Conv.string_of_yojson in
       let params = Json.field fields Constant.params Structured.t_of_yojson in
-      Notification { Notification.params; method_ }
+      let event_index = Json.field fields Constant.event_index event_index_of_yojson in
+      Notification { Notification.params; method_; event_index }
     | Some id ->
       (match Json.field fields Constant.method_ Json.Conv.string_of_yojson with
        | Some method_ ->
          let params = Json.field fields Constant.params Structured.t_of_yojson in
-         Request { Request.method_; params; id }
+         let request_time =
+           Json.field fields Constant.request_time Request_time.t_of_yojson
+         in
+         let event_index = Json.field fields Constant.event_index event_index_of_yojson in
+         Request { Request.method_; params; id; request_time; event_index }
        | None ->
          Response
            (match Json.field fields Constant.result (fun x -> x) with

@@ -1,3 +1,4 @@
+module Fiber = Ocaml_lsp_fiber
 open Async
 open Test.Import
 module Req = Ocaml_lsp_server.Custom_request.Type_enclosing
@@ -13,7 +14,8 @@ module Util = struct
       |> Option.some
     in
     let req =
-      Lsp.Client_request.UnknownRequest { meth = "ocamllsp/typeEnclosing"; params }
+      Lsp.Client_request.UnknownRequest
+        { meth = Lsp.Client_request.Custom_request_names.type_enclosing; params }
     in
     Client.request client req
   ;;
@@ -50,16 +52,16 @@ let%expect_test "Application of function without range end" =
       "index": 0,
       "enclosings": [
         {
-          "end": { "character": 13, "line": 0 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 0, "character": 13 }
         },
         {
-          "end": { "character": 13, "line": 0 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 0, "character": 13 }
         },
         {
-          "end": { "character": 16, "line": 0 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 0, "character": 16 }
         }
       ],
       "type": "int -> string"
@@ -83,16 +85,16 @@ let%expect_test "Application of function with range end (including the current \
       "index": 0,
       "enclosings": [
         {
-          "end": { "character": 13, "line": 0 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 0, "character": 13 }
         },
         {
-          "end": { "character": 13, "line": 0 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 0, "character": 13 }
         },
         {
-          "end": { "character": 16, "line": 0 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 0, "character": 16 }
         }
       ],
       "type": "int -> string"
@@ -115,8 +117,8 @@ let%expect_test "Application of function with range end (excluding the current e
       "index": 0,
       "enclosings": [
         {
-          "end": { "character": 16, "line": 0 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 0, "character": 16 }
         }
       ],
       "type": "string"
@@ -144,8 +146,8 @@ let%expect_test {|
       "index": 0,
       "enclosings": [
         {
-          "end": { "character": 5, "line": 0 },
-          "start": { "character": 4, "line": 0 }
+          "start": { "line": 0, "character": 4 },
+          "end": { "line": 0, "character": 5 }
         }
       ],
       "type": "string"
@@ -169,16 +171,16 @@ let%expect_test {|
       "index": 0,
       "enclosings": [
         {
-          "end": { "character": 21, "line": 0 },
-          "start": { "character": 8, "line": 0 }
+          "start": { "line": 0, "character": 8 },
+          "end": { "line": 0, "character": 21 }
         },
         {
-          "end": { "character": 21, "line": 0 },
-          "start": { "character": 8, "line": 0 }
+          "start": { "line": 0, "character": 8 },
+          "end": { "line": 0, "character": 21 }
         },
         {
-          "end": { "character": 26, "line": 0 },
-          "start": { "character": 8, "line": 0 }
+          "start": { "line": 0, "character": 8 },
+          "end": { "line": 0, "character": 26 }
         }
       ],
       "type": "int -> string"
@@ -207,12 +209,12 @@ let%expect_test {|
       "index": 0,
       "enclosings": [
         {
-          "end": { "character": 26, "line": 0 },
-          "start": { "character": 22, "line": 0 }
+          "start": { "line": 0, "character": 22 },
+          "end": { "line": 0, "character": 26 }
         },
         {
-          "end": { "character": 26, "line": 0 },
-          "start": { "character": 8, "line": 0 }
+          "start": { "line": 0, "character": 8 },
+          "end": { "line": 0, "character": 26 }
         }
       ],
       "type": "int"
@@ -243,12 +245,12 @@ let%expect_test {|
       "index": 1,
       "enclosings": [
         {
-          "end": { "character": 26, "line": 0 },
-          "start": { "character": 22, "line": 0 }
+          "start": { "line": 0, "character": 22 },
+          "end": { "line": 0, "character": 26 }
         },
         {
-          "end": { "character": 26, "line": 0 },
-          "start": { "character": 8, "line": 0 }
+          "start": { "line": 0, "character": 8 },
+          "end": { "line": 0, "character": 26 }
         }
       ],
       "type": "string"
@@ -296,16 +298,16 @@ end|}
       "index": 0,
       "enclosings": [
         {
-          "end": { "character": 7, "line": 16 },
-          "start": { "character": 6, "line": 16 }
+          "start": { "line": 16, "character": 6 },
+          "end": { "line": 16, "character": 7 }
         },
         {
-          "end": { "character": 3, "line": 17 },
-          "start": { "character": 11, "line": 2 }
+          "start": { "line": 2, "character": 11 },
+          "end": { "line": 17, "character": 3 }
         },
         {
-          "end": { "character": 3, "line": 17 },
-          "start": { "character": 0, "line": 2 }
+          "start": { "line": 2, "character": 0 },
+          "end": { "line": 17, "character": 3 }
         }
       ],
       "type": "type t = { a : string; b : float; }"
@@ -352,16 +354,16 @@ end|}
       "index": 2,
       "enclosings": [
         {
-          "end": { "character": 7, "line": 16 },
-          "start": { "character": 6, "line": 16 }
+          "start": { "line": 16, "character": 6 },
+          "end": { "line": 16, "character": 7 }
         },
         {
-          "end": { "character": 3, "line": 17 },
-          "start": { "character": 11, "line": 2 }
+          "start": { "line": 2, "character": 11 },
+          "end": { "line": 17, "character": 3 }
         },
         {
-          "end": { "character": 3, "line": 17 },
-          "start": { "character": 0, "line": 2 }
+          "start": { "line": 2, "character": 0 },
+          "end": { "line": 17, "character": 3 }
         }
       ],
       "type": "sig\n  val f : unit -> int\n  val g : a\n  val h : 'a -> 'a\n  module B : sig type b = Baz val x : b * int val y : a * a end\n  type t = { a : string; b : float; }\n  val z : t\nend"
@@ -410,28 +412,28 @@ end|}
       "index": 0,
       "enclosings": [
         {
-          "end": { "character": 20, "line": 10 },
-          "start": { "character": 18, "line": 10 }
+          "start": { "line": 10, "character": 18 },
+          "end": { "line": 10, "character": 20 }
         },
         {
-          "end": { "character": 21, "line": 10 },
-          "start": { "character": 12, "line": 10 }
+          "start": { "line": 10, "character": 12 },
+          "end": { "line": 10, "character": 21 }
         },
         {
-          "end": { "character": 5, "line": 12 },
-          "start": { "character": 13, "line": 7 }
+          "start": { "line": 7, "character": 13 },
+          "end": { "line": 12, "character": 5 }
         },
         {
-          "end": { "character": 5, "line": 12 },
-          "start": { "character": 2, "line": 7 }
+          "start": { "line": 7, "character": 2 },
+          "end": { "line": 12, "character": 5 }
         },
         {
-          "end": { "character": 3, "line": 17 },
-          "start": { "character": 11, "line": 2 }
+          "start": { "line": 2, "character": 11 },
+          "end": { "line": 17, "character": 3 }
         },
         {
-          "end": { "character": 3, "line": 17 },
-          "start": { "character": 0, "line": 2 }
+          "start": { "line": 2, "character": 0 },
+          "end": { "line": 17, "character": 3 }
         }
       ],
       "type": "int"
@@ -480,28 +482,28 @@ end|}
       "index": 1,
       "enclosings": [
         {
-          "end": { "character": 20, "line": 10 },
-          "start": { "character": 18, "line": 10 }
+          "start": { "line": 10, "character": 18 },
+          "end": { "line": 10, "character": 20 }
         },
         {
-          "end": { "character": 21, "line": 10 },
-          "start": { "character": 12, "line": 10 }
+          "start": { "line": 10, "character": 12 },
+          "end": { "line": 10, "character": 21 }
         },
         {
-          "end": { "character": 5, "line": 12 },
-          "start": { "character": 13, "line": 7 }
+          "start": { "line": 7, "character": 13 },
+          "end": { "line": 12, "character": 5 }
         },
         {
-          "end": { "character": 5, "line": 12 },
-          "start": { "character": 2, "line": 7 }
+          "start": { "line": 7, "character": 2 },
+          "end": { "line": 12, "character": 5 }
         },
         {
-          "end": { "character": 3, "line": 17 },
-          "start": { "character": 11, "line": 2 }
+          "start": { "line": 2, "character": 11 },
+          "end": { "line": 17, "character": 3 }
         },
         {
-          "end": { "character": 3, "line": 17 },
-          "start": { "character": 0, "line": 2 }
+          "start": { "line": 2, "character": 0 },
+          "end": { "line": 17, "character": 3 }
         }
       ],
       "type": "b * int"

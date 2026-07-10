@@ -2,6 +2,7 @@
     from ocaml-lsp. We build ocaml-lsp with [-open Lev_fiber_async] to make it magically
     use Async as its scheduler instead of Lev. *)
 
+module Fiber = Ocaml_lsp_fiber
 (* Do not open anything here, as it can change the meaning of the signatures. *)
 
 module Lev_fiber = struct
@@ -76,7 +77,8 @@ module Lev_fiber = struct
       (** Wait for a job to finish. *)
       val await
         :  'a task
-        -> ('a, [ `Exn of Stdune.Exn_with_backtrace.t | `Cancelled ]) result Fiber.t
+        -> ('a, [ `Exn of Ocaml_lsp_stdune.Exn_with_backtrace.t | `Cancelled ]) result
+             Fiber.t
 
       (** Close the queue for the thread and return the thread to Async's thread pool.
           After [close] is called, calls to [task] will return [Error `Stopped]. *)
@@ -133,10 +135,6 @@ module Lev_fiber = struct
 
       val with_read : input t -> f:(Reader.t -> 'a Fiber.t) -> 'a Fiber.t
       val with_write : output t -> f:(Writer.t -> 'a Fiber.t) -> 'a Fiber.t
-
-      (* CR-someday ddickstein: When https://github.com/ocaml/ocaml-lsp/issues/1158 is
-         resolved, update the comment below and update the logic in the read functions for
-         handling closed readers. *)
 
       (** Close the reader / writer. Reading from a closed reader will result in EOF. *)
       val close : 'a t -> unit

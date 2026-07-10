@@ -12,15 +12,36 @@ module Resolve : sig
   include Json.Jsonable.S with type t := t
 end
 
+module Complete_by_prefix : sig
+  (** Use Merlin to obtain completions and perform some processing to make the result more
+      suitable for returning by LSP. As an exception to this, in the case that Merlin
+      reports that the [Position.t] is a function application context, do not squash
+      function argument names into the completions list, as is normally necessary for
+      [textDocument/completion] requests. Instead, return those function argument names as
+      the [(string * string) list option]. *)
+  val complete_nosquash
+    :  log_info:Log_info.t
+    -> State.t
+    -> Document.Merlin.t
+    -> prefix:string
+    -> suffix:string
+    -> Position.t
+    -> deprecated:bool
+    -> resolve:bool
+    -> (CompletionItem.t list * (string * string) list option) Fiber.t
+end
+
+(** Creates a server response for ["textDocument/completion"]. *)
 val complete
-  :  log_info:Lsp_timing_logger.t
+  :  log_info:Log_info.t
   -> State.t
   -> CompletionParams.t
   -> [> `CompletionList of CompletionList.t ] option Fiber.t
 
-(** creates a server response for ["completionItem/resolve"] *)
+(** Creates a server response for ["completionItem/resolve"]. *)
 val resolve
-  :  Document.Merlin.t
+  :  log_info:Log_info.t
+  -> Document.Merlin.t
   -> CompletionItem.t
   -> Resolve.t
   -> (Document.Merlin.t -> [> `Logical of int * int ] -> string option Fiber.t)
@@ -36,11 +57,18 @@ val resolve
 
     @param short_path
       determines whether we want full prefix or cut at ["."], e.g.
-      [List.m<cursor>] returns ["m"] when [short_path] is set vs ["List.m"] when
-      not.
-    @return prefix of [position] in [source] and its length
+      [List.m<cursor>] returns
+      - ["List.m"] when [short_path] is [`None]
+      - ["m"] when [short_path] is [`Suffix]
+      - ["List."] when [short_path] is [`Prefix]
+
+    @return prefix of [position] in [source]
     v} *)
-val prefix_of_position : short_path:bool -> Msource.t -> [< Msource.position ] -> string
+val prefix_of_position
+  :  short_path:[ `None | `Prefix | `Suffix ]
+  -> Msource.t
+  -> [< Msource.position ]
+  -> string
 
 (** Similar to [prefix_of_position] but computes a suffix. *)
 val suffix_of_position : Msource.t -> [< Msource.position ] -> string

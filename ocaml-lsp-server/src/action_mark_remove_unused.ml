@@ -53,8 +53,7 @@ let find_unused_diagnostic pos ds =
     kind, d)
 ;;
 
-(* Return contexts enclosing `pos` in order from most specific to most
-   general. *)
+(* Return contexts enclosing `pos` in order from most specific to most general. *)
 let enclosing_pos pipeline pos =
   let browse =
     Mpipeline.typer_result pipeline |> Mtyper.get_typedtree |> Mbrowse.of_typedtree
@@ -62,12 +61,12 @@ let enclosing_pos pipeline pos =
   Mbrowse.enclosing (Mpipeline.get_lexing_pos pipeline @@ Position.logical pos) [ browse ]
 ;;
 
-(* `name` is an unused binding. `contexts` is a list of Mbrowse.t enclosing an
-   unused definition of `name`, in order from most general to most specific.
-   Returns an edit that silences the 'unused value' warning. *)
+(* `name` is an unused binding. `contexts` is a list of Mbrowse.t enclosing an unused
+   definition of `name`, in order from most general to most specific. Returns an edit that
+   silences the 'unused value' warning. *)
 let rec mark_value_unused_edit name contexts =
   match contexts with
-  | Browse_raw.Pattern { pat_desc = Tpat_record (pats, _); _ } :: cs ->
+  | Browse_raw.Pattern { pat_desc = Tpat_record (pats, _, _, _); _ } :: cs ->
     let m_field_edit =
       List.find_map
         pats
@@ -75,7 +74,7 @@ let rec mark_value_unused_edit name contexts =
           (function
            | ( { loc = field_loc; _ }
              , _
-             , { pat_desc = Tpat_var (ident, _, _, _, _); pat_loc; _ } )
+             , { pat_desc = Tpat_var { id = ident; _ }; pat_loc; _ } )
              when Ident.name ident = name ->
              (* Special case for record shorthand *)
              if field_loc.loc_start = pat_loc.loc_start
@@ -90,14 +89,14 @@ let rec mark_value_unused_edit name contexts =
                  { range = Range.create ~start:start_pos ~end_:start_pos; newText = "_" }
            | _ -> None
            : Longident.t Loc.loc
-             * Types.label_description
+             * Ocaml_typing.Data_types.label_description
              * Typedtree.value Typedtree.general_pattern
              -> TextEdit.t option)
     in
     (match m_field_edit with
      | Some e -> Some e
      | None -> mark_value_unused_edit name cs)
-  | Pattern { pat_desc = Tpat_var (ident, _, _, _, _); pat_loc = loc; _ } :: _ ->
+  | Pattern { pat_desc = Tpat_var { id = ident; _ }; pat_loc = loc; _ } :: _ ->
     if Ident.name ident = name
     then
       let+ start = Position.of_lexical_position loc.loc_start in
@@ -124,15 +123,17 @@ let code_action_mark_value_unused pipeline doc (diagnostic : Diagnostic.t) =
     ()
 ;;
 
-(* Takes a list of contexts enclosing a binding of `name`. Returns the range of
-   the most specific binding. *)
+(* Takes a list of contexts enclosing a binding of `name`. Returns the range of the most
+   specific binding. *)
 let enclosing_value_binding_range name =
   List.find_map ~f:(function
     | Browse_raw.Expression
         { exp_desc =
             Texp_let
               ( _
-              , [ { vb_pat = { pat_desc = Tpat_var (_, { txt = name'; _ }, _, _, _); _ }; _ }
+              , [ { vb_pat = { pat_desc = Tpat_var { name = { txt = name'; _ }; _ }; _ }
+                  ; _
+                  }
                 ]
               , { exp_loc = { loc_start = let_end; _ }; _ } )
         ; exp_loc = { loc_start = let_start; _ }

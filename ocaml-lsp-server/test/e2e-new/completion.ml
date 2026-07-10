@@ -1,3 +1,4 @@
+module Fiber = Ocaml_lsp_fiber
 open Async
 open Test.Import
 
@@ -21,6 +22,7 @@ let print_completions
   ?(path = "foo.ml")
   ?(limit = 10)
   ?(pre_print = fun x -> x)
+  ?filter_by_prefix
   source
   position
   =
@@ -32,6 +34,16 @@ let print_completions
         | `CompletionList comp -> comp.items
         | `List comp -> comp
       in
+      let items =
+        match filter_by_prefix with
+        | Some prefix ->
+          List.filter items ~f:(fun (item : CompletionItem.t) ->
+            String.for_all (String.lowercase prefix) ~f:(fun c ->
+              String.contains (String.lowercase item.label) c))
+          |> List.sort ~compare:(fun (a : CompletionItem.t) (b : CompletionItem.t) ->
+            Int.compare (String.length a.label) (String.length b.label))
+        | None -> items
+      in
       items
       |> pre_print
       |> (function
@@ -39,9 +51,8 @@ let print_completions
        | items ->
          print_endline "Completions:";
          let originalLength = List.length items in
-         items
-         |> List.take (min limit originalLength)
-         |> List.iter ~f:(fun item ->
+         Core.List.take items (min limit originalLength)
+         |> Core.List.iter ~f:(fun item ->
            item
            |> CompletionItem.yojson_of_t
            |> Yojson.Safe.pretty_to_string ~std:false
@@ -64,8 +75,8 @@ let%expect_test "can start completion at arbitrary position (before the dot)" =
       "textEdit": {
         "newText": "String",
         "range": {
-          "end": { "character": 5, "line": 0 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 0, "character": 5 }
         }
       }
     }
@@ -77,12 +88,141 @@ let%expect_test "can start completion at arbitrary position (before the dot)" =
       "textEdit": {
         "newText": "StringLabels",
         "range": {
-          "end": { "character": 5, "line": 0 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 0, "character": 5 }
         }
       }
     }
     |}]
+;;
+
+let%expect_test "Fuzzy completion enabled (VSCode behavior)" =
+  let source = {ocaml|List.mp|ocaml} in
+  let position = Position.create ~line:0 ~character:7 in
+  let%bind () = print_completions source position in
+  [%expect {| No completions |}];
+  let prep_vscode_fuzzy_completion client =
+    let settings = `Assoc [ "fuzzyCompletion", `Assoc [ "enable", `Bool true ] ] in
+    Client.notification client (ChangeConfiguration { settings })
+  in
+  let%bind () =
+    print_completions
+      ~prep:prep_vscode_fuzzy_completion
+      source
+      position
+      ~limit:2
+      ~filter_by_prefix:"mp"
+  in
+  [%expect
+    {|
+    Completions:
+    {
+      "detail": "('a -> 'b) -> 'a list -> 'b list",
+      "kind": 12,
+      "label": "map",
+      "sortText": "0044",
+      "textEdit": {
+        "newText": "map",
+        "range": {
+          "start": { "line": 0, "character": 5 },
+          "end": { "line": 0, "character": 7 }
+        }
+      }
+    }
+    {
+      "detail": "('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list",
+      "kind": 12,
+      "label": "map2",
+      "sortText": "0045",
+      "textEdit": {
+        "newText": "map2",
+        "range": {
+          "start": { "line": 0, "character": 5 },
+          "end": { "line": 0, "character": 7 }
+        }
+      }
+    }
+    .............
+    |}];
+  let%bind () =
+    print_completions
+      ~prep:prep_vscode_fuzzy_completion
+      {ocaml|Lst|ocaml}
+      position
+      ~limit:2
+      ~filter_by_prefix:"Lst"
+  in
+  [%expect
+    {|
+    Completions:
+    {
+      "detail": "",
+      "kind": 9,
+      "label": "List",
+      "sortText": "0257",
+      "textEdit": {
+        "newText": "List",
+        "range": {
+          "start": { "line": 0, "character": 4 },
+          "end": { "line": 0, "character": 7 }
+        }
+      }
+    }
+    {
+      "detail": "type ('a : value_or_null) list = [] | (::) of 'a * 'a list",
+      "kind": 25,
+      "label": "list",
+      "sortText": "0344",
+      "textEdit": {
+        "newText": "list",
+        "range": {
+          "start": { "line": 0, "character": 4 },
+          "end": { "line": 0, "character": 7 }
+        }
+      }
+    }
+    .............
+    |}];
+  let%bind () =
+    print_completions
+      ~prep:prep_vscode_fuzzy_completion
+      {ocaml|lst|ocaml}
+      position
+      ~limit:2
+      ~filter_by_prefix:"lst"
+  in
+  [%expect
+    {|
+    Completions:
+    {
+      "detail": "type ('a : value_or_null) list = [] | (::) of 'a * 'a list",
+      "kind": 25,
+      "label": "list",
+      "sortText": "0273",
+      "textEdit": {
+        "newText": "list",
+        "range": {
+          "start": { "line": 0, "character": 4 },
+          "end": { "line": 0, "character": 7 }
+        }
+      }
+    }
+    {
+      "detail": "",
+      "kind": 9,
+      "label": "List",
+      "sortText": "0317",
+      "textEdit": {
+        "newText": "List",
+        "range": {
+          "start": { "line": 0, "character": 4 },
+          "end": { "line": 0, "character": 7 }
+        }
+      }
+    }
+    .............
+    |}];
+  Deferred.unit
 ;;
 
 let%expect_test "can start completion at arbitrary position" =
@@ -100,8 +240,8 @@ let%expect_test "can start completion at arbitrary position" =
       "textEdit": {
         "newText": "String",
         "range": {
-          "end": { "character": 6, "line": 0 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 0, "character": 6 }
         }
       }
     }
@@ -113,8 +253,8 @@ let%expect_test "can start completion at arbitrary position" =
       "textEdit": {
         "newText": "StringLabels",
         "range": {
-          "end": { "character": 6, "line": 0 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 0, "character": 6 }
         }
       }
     }
@@ -136,8 +276,8 @@ let%expect_test "can start completion at arbitrary position 2" =
       "textEdit": {
         "newText": "StringLabels",
         "range": {
-          "end": { "character": 7, "line": 0 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 0, "character": 7 }
         }
       }
     }
@@ -159,21 +299,8 @@ let%expect_test "can start completion after operator without space" =
       "textEdit": {
         "newText": "map",
         "range": {
-          "end": { "character": 14, "line": 0 },
-          "start": { "character": 12, "line": 0 }
-        }
-      }
-    }
-    {
-      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
-      "kind": 12,
-      "label": "mapi",
-      "sortText": "0001",
-      "textEdit": {
-        "newText": "mapi",
-        "range": {
-          "end": { "character": 14, "line": 0 },
-          "start": { "character": 12, "line": 0 }
+          "start": { "line": 0, "character": 12 },
+          "end": { "line": 0, "character": 14 }
         }
       }
     }
@@ -181,12 +308,25 @@ let%expect_test "can start completion after operator without space" =
       "detail": "('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list",
       "kind": 12,
       "label": "map2",
-      "sortText": "0002",
+      "sortText": "0001",
       "textEdit": {
         "newText": "map2",
         "range": {
-          "end": { "character": 14, "line": 0 },
-          "start": { "character": 12, "line": 0 }
+          "start": { "line": 0, "character": 12 },
+          "end": { "line": 0, "character": 14 }
+        }
+      }
+    }
+    {
+      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
+      "kind": 12,
+      "label": "mapi",
+      "sortText": "0002",
+      "textEdit": {
+        "newText": "mapi",
+        "range": {
+          "start": { "line": 0, "character": 12 },
+          "end": { "line": 0, "character": 14 }
         }
       }
     }
@@ -208,21 +348,8 @@ let%expect_test "can start completion after operator with space" =
       "textEdit": {
         "newText": "map",
         "range": {
-          "end": { "character": 16, "line": 0 },
-          "start": { "character": 14, "line": 0 }
-        }
-      }
-    }
-    {
-      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
-      "kind": 12,
-      "label": "mapi",
-      "sortText": "0001",
-      "textEdit": {
-        "newText": "mapi",
-        "range": {
-          "end": { "character": 16, "line": 0 },
-          "start": { "character": 14, "line": 0 }
+          "start": { "line": 0, "character": 14 },
+          "end": { "line": 0, "character": 16 }
         }
       }
     }
@@ -230,12 +357,25 @@ let%expect_test "can start completion after operator with space" =
       "detail": "('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list",
       "kind": 12,
       "label": "map2",
-      "sortText": "0002",
+      "sortText": "0001",
       "textEdit": {
         "newText": "map2",
         "range": {
-          "end": { "character": 16, "line": 0 },
-          "start": { "character": 14, "line": 0 }
+          "start": { "line": 0, "character": 14 },
+          "end": { "line": 0, "character": 16 }
+        }
+      }
+    }
+    {
+      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
+      "kind": 12,
+      "label": "mapi",
+      "sortText": "0002",
+      "textEdit": {
+        "newText": "mapi",
+        "range": {
+          "start": { "line": 0, "character": 14 },
+          "end": { "line": 0, "character": 16 }
         }
       }
     }
@@ -257,21 +397,8 @@ let%expect_test "can start completion in dot chain with tab" =
       "textEdit": {
         "newText": "map",
         "range": {
-          "end": { "character": 17, "line": 0 },
-          "start": { "character": 15, "line": 0 }
-        }
-      }
-    }
-    {
-      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
-      "kind": 12,
-      "label": "mapi",
-      "sortText": "0001",
-      "textEdit": {
-        "newText": "mapi",
-        "range": {
-          "end": { "character": 17, "line": 0 },
-          "start": { "character": 15, "line": 0 }
+          "start": { "line": 0, "character": 15 },
+          "end": { "line": 0, "character": 17 }
         }
       }
     }
@@ -279,12 +406,25 @@ let%expect_test "can start completion in dot chain with tab" =
       "detail": "('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list",
       "kind": 12,
       "label": "map2",
-      "sortText": "0002",
+      "sortText": "0001",
       "textEdit": {
         "newText": "map2",
         "range": {
-          "end": { "character": 17, "line": 0 },
-          "start": { "character": 15, "line": 0 }
+          "start": { "line": 0, "character": 15 },
+          "end": { "line": 0, "character": 17 }
+        }
+      }
+    }
+    {
+      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
+      "kind": 12,
+      "label": "mapi",
+      "sortText": "0002",
+      "textEdit": {
+        "newText": "mapi",
+        "range": {
+          "start": { "line": 0, "character": 15 },
+          "end": { "line": 0, "character": 17 }
         }
       }
     }
@@ -309,21 +449,8 @@ ma|ocaml}
       "textEdit": {
         "newText": "map",
         "range": {
-          "end": { "character": 2, "line": 1 },
-          "start": { "character": 0, "line": 1 }
-        }
-      }
-    }
-    {
-      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
-      "kind": 12,
-      "label": "mapi",
-      "sortText": "0001",
-      "textEdit": {
-        "newText": "mapi",
-        "range": {
-          "end": { "character": 2, "line": 1 },
-          "start": { "character": 0, "line": 1 }
+          "start": { "line": 1, "character": 0 },
+          "end": { "line": 1, "character": 2 }
         }
       }
     }
@@ -331,12 +458,25 @@ ma|ocaml}
       "detail": "('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list",
       "kind": 12,
       "label": "map2",
-      "sortText": "0002",
+      "sortText": "0001",
       "textEdit": {
         "newText": "map2",
         "range": {
-          "end": { "character": 2, "line": 1 },
-          "start": { "character": 0, "line": 1 }
+          "start": { "line": 1, "character": 0 },
+          "end": { "line": 1, "character": 2 }
+        }
+      }
+    }
+    {
+      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
+      "kind": 12,
+      "label": "mapi",
+      "sortText": "0002",
+      "textEdit": {
+        "newText": "mapi",
+        "range": {
+          "start": { "line": 1, "character": 0 },
+          "end": { "line": 1, "character": 2 }
         }
       }
     }
@@ -358,21 +498,8 @@ let%expect_test "can start completion in dot chain with space" =
       "textEdit": {
         "newText": "map",
         "range": {
-          "end": { "character": 17, "line": 0 },
-          "start": { "character": 15, "line": 0 }
-        }
-      }
-    }
-    {
-      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
-      "kind": 12,
-      "label": "mapi",
-      "sortText": "0001",
-      "textEdit": {
-        "newText": "mapi",
-        "range": {
-          "end": { "character": 17, "line": 0 },
-          "start": { "character": 15, "line": 0 }
+          "start": { "line": 0, "character": 15 },
+          "end": { "line": 0, "character": 17 }
         }
       }
     }
@@ -380,12 +507,25 @@ let%expect_test "can start completion in dot chain with space" =
       "detail": "('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list",
       "kind": 12,
       "label": "map2",
-      "sortText": "0002",
+      "sortText": "0001",
       "textEdit": {
         "newText": "map2",
         "range": {
-          "end": { "character": 17, "line": 0 },
-          "start": { "character": 15, "line": 0 }
+          "start": { "line": 0, "character": 15 },
+          "end": { "line": 0, "character": 17 }
+        }
+      }
+    }
+    {
+      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
+      "kind": 12,
+      "label": "mapi",
+      "sortText": "0002",
+      "textEdit": {
+        "newText": "mapi",
+        "range": {
+          "start": { "line": 0, "character": 15 },
+          "end": { "line": 0, "character": 17 }
         }
       }
     }
@@ -410,8 +550,8 @@ let%expect_test "can start completion after dereference" =
       "textEdit": {
         "newText": "apple",
         "range": {
-          "end": { "character": 3, "line": 1 },
-          "start": { "character": 1, "line": 1 }
+          "start": { "line": 1, "character": 1 },
+          "end": { "line": 1, "character": 3 }
         }
       }
     }
@@ -436,8 +576,8 @@ g ~f:ig|ocaml}
       "textEdit": {
         "newText": "ignore",
         "range": {
-          "end": { "character": 7, "line": 1 },
-          "start": { "character": 5, "line": 1 }
+          "start": { "line": 1, "character": 5 },
+          "end": { "line": 1, "character": 7 }
         }
       }
     }
@@ -449,8 +589,8 @@ g ~f:ig|ocaml}
       "textEdit": {
         "newText": "ignore_contended",
         "range": {
-          "end": { "character": 7, "line": 1 },
-          "start": { "character": 5, "line": 1 }
+          "start": { "line": 1, "character": 5 },
+          "end": { "line": 1, "character": 7 }
         }
       }
     }
@@ -476,8 +616,8 @@ g ~f:M.ig|ocaml}
       "textEdit": {
         "newText": "igfoo",
         "range": {
-          "end": { "character": 9, "line": 2 },
-          "start": { "character": 7, "line": 2 }
+          "start": { "line": 2, "character": 7 },
+          "end": { "line": 2, "character": 9 }
         }
       }
     }
@@ -504,8 +644,8 @@ g ?f:ig
       "textEdit": {
         "newText": "ignore",
         "range": {
-          "end": { "character": 7, "line": 2 },
-          "start": { "character": 5, "line": 2 }
+          "start": { "line": 2, "character": 5 },
+          "end": { "line": 2, "character": 7 }
         }
       }
     }
@@ -517,8 +657,8 @@ g ?f:ig
       "textEdit": {
         "newText": "ignore_contended",
         "range": {
-          "end": { "character": 7, "line": 2 },
-          "start": { "character": 5, "line": 2 }
+          "start": { "line": 2, "character": 5 },
+          "end": { "line": 2, "character": 7 }
         }
       }
     }
@@ -544,8 +684,8 @@ g ?f:M.ig|ocaml}
       "textEdit": {
         "newText": "igfoo",
         "range": {
-          "end": { "character": 9, "line": 2 },
-          "start": { "character": 7, "line": 2 }
+          "start": { "line": 2, "character": 7 },
+          "end": { "line": 2, "character": 9 }
         }
       }
     }
@@ -576,8 +716,8 @@ let x = Test.
       "textEdit": {
         "newText": "somenum",
         "range": {
-          "end": { "character": 13, "line": 6 },
-          "start": { "character": 13, "line": 6 }
+          "start": { "line": 6, "character": 13 },
+          "end": { "line": 6, "character": 13 }
         }
       }
     }
@@ -589,8 +729,8 @@ let x = Test.
       "textEdit": {
         "newText": "somestring",
         "range": {
-          "end": { "character": 13, "line": 6 },
-          "start": { "character": 13, "line": 6 }
+          "start": { "line": 6, "character": 13 },
+          "end": { "line": 6, "character": 13 }
         }
       }
     }
@@ -617,8 +757,8 @@ let y = 1 >
       "textEdit": {
         "newText": ">>|",
         "range": {
-          "end": { "character": 11, "line": 2 },
-          "start": { "character": 10, "line": 2 }
+          "start": { "line": 2, "character": 10 },
+          "end": { "line": 2, "character": 11 }
         }
       }
     }
@@ -630,8 +770,8 @@ let y = 1 >
       "textEdit": {
         "newText": ">",
         "range": {
-          "end": { "character": 11, "line": 2 },
-          "start": { "character": 10, "line": 2 }
+          "start": { "line": 2, "character": 10 },
+          "end": { "line": 2, "character": 11 }
         }
       }
     }
@@ -643,8 +783,8 @@ let y = 1 >
       "textEdit": {
         "newText": ">=",
         "range": {
-          "end": { "character": 11, "line": 2 },
-          "start": { "character": 10, "line": 2 }
+          "start": { "line": 2, "character": 10 },
+          "end": { "line": 2, "character": 11 }
         }
       }
     }
@@ -674,8 +814,8 @@ let plus_42 (x:int) (y:int) =
       "textEdit": {
         "newText": "+",
         "range": {
-          "end": { "character": 12, "line": 5 },
-          "start": { "character": 11, "line": 5 }
+          "start": { "line": 5, "character": 11 },
+          "end": { "line": 5, "character": 12 }
         }
       }
     }
@@ -687,8 +827,8 @@ let plus_42 (x:int) (y:int) =
       "textEdit": {
         "newText": "+.",
         "range": {
-          "end": { "character": 12, "line": 5 },
-          "start": { "character": 11, "line": 5 }
+          "start": { "line": 5, "character": 11 },
+          "end": { "line": 5, "character": 12 }
         }
       }
     }
@@ -710,8 +850,8 @@ let%expect_test "completes labels" =
       "textEdit": {
         "newText": "~+",
         "range": {
-          "end": { "character": 24, "line": 0 },
-          "start": { "character": 23, "line": 0 }
+          "start": { "line": 0, "character": 23 },
+          "end": { "line": 0, "character": 24 }
         }
       }
     }
@@ -723,8 +863,8 @@ let%expect_test "completes labels" =
       "textEdit": {
         "newText": "~+.",
         "range": {
-          "end": { "character": 24, "line": 0 },
-          "start": { "character": 23, "line": 0 }
+          "start": { "line": 0, "character": 23 },
+          "end": { "line": 0, "character": 24 }
         }
       }
     }
@@ -736,8 +876,8 @@ let%expect_test "completes labels" =
       "textEdit": {
         "newText": "~-",
         "range": {
-          "end": { "character": 24, "line": 0 },
-          "start": { "character": 23, "line": 0 }
+          "start": { "line": 0, "character": 23 },
+          "end": { "line": 0, "character": 24 }
         }
       }
     }
@@ -749,8 +889,8 @@ let%expect_test "completes labels" =
       "textEdit": {
         "newText": "~-.",
         "range": {
-          "end": { "character": 24, "line": 0 },
-          "start": { "character": 23, "line": 0 }
+          "start": { "line": 0, "character": 23 },
+          "end": { "line": 0, "character": 24 }
         }
       }
     }
@@ -762,8 +902,8 @@ let%expect_test "completes labels" =
       "textEdit": {
         "newText": "~f",
         "range": {
-          "end": { "character": 24, "line": 0 },
-          "start": { "character": 23, "line": 0 }
+          "start": { "line": 0, "character": 23 },
+          "end": { "line": 0, "character": 24 }
         }
       }
     }
@@ -791,8 +931,8 @@ let u = f `Str
       "textEdit": {
         "newText": "`String",
         "range": {
-          "end": { "character": 14, "line": 3 },
-          "start": { "character": 10, "line": 3 }
+          "start": { "line": 3, "character": 10 },
+          "end": { "line": 3, "character": 14 }
         }
       }
     }
@@ -820,8 +960,8 @@ let u = f `In
       "textEdit": {
         "newText": "`Int",
         "range": {
-          "end": { "character": 13, "line": 3 },
-          "start": { "character": 10, "line": 3 }
+          "start": { "line": 3, "character": 10 },
+          "end": { "line": 3, "character": 13 }
         }
       }
     }
@@ -849,8 +989,8 @@ let x : t = `I
       "textEdit": {
         "newText": "`Int",
         "range": {
-          "end": { "character": 15, "line": 3 },
-          "start": { "character": 13, "line": 3 }
+          "start": { "line": 3, "character": 13 },
+          "end": { "line": 3, "character": 15 }
         }
       }
     }
@@ -862,7 +1002,7 @@ let%expect_test "completion for holes" =
   let position = Position.create ~line:0 ~character:15 in
   let filter =
     List.filter ~f:(fun (item : CompletionItem.t) ->
-      not (String.starts_with ~prefix:"__" item.label))
+      not (String.is_prefix item.label ~prefix:"__"))
   in
   let%map () = print_completions ~pre_print:filter source position in
   [%expect
@@ -876,8 +1016,8 @@ let%expect_test "completion for holes" =
       "textEdit": {
         "newText": "0",
         "range": {
-          "end": { "character": 15, "line": 0 },
-          "start": { "character": 14, "line": 0 }
+          "start": { "line": 0, "character": 14 },
+          "end": { "line": 0, "character": 15 }
         }
       }
     }
@@ -907,8 +1047,8 @@ let () =
       "textEdit": {
         "newText": "somenum",
         "range": {
-          "end": { "character": 6, "line": 5 },
-          "start": { "character": 2, "line": 5 }
+          "start": { "line": 5, "character": 2 },
+          "end": { "line": 5, "character": 6 }
         }
       }
     }
@@ -920,8 +1060,8 @@ let () =
       "textEdit": {
         "newText": "somestring",
         "range": {
-          "end": { "character": 6, "line": 5 },
-          "start": { "character": 2, "line": 5 }
+          "start": { "line": 5, "character": 2 },
+          "end": { "line": 5, "character": 6 }
         }
       }
     }
@@ -943,8 +1083,8 @@ let%expect_test "completes from a module" =
       "textEdit": {
         "newText": "map",
         "range": {
-          "end": { "character": 14, "line": 0 },
-          "start": { "character": 13, "line": 0 }
+          "start": { "line": 0, "character": 13 },
+          "end": { "line": 0, "character": 14 }
         }
       }
     }
@@ -956,8 +1096,8 @@ let%expect_test "completes from a module" =
       "textEdit": {
         "newText": "map2",
         "range": {
-          "end": { "character": 14, "line": 0 },
-          "start": { "character": 13, "line": 0 }
+          "start": { "line": 0, "character": 13 },
+          "end": { "line": 0, "character": 14 }
         }
       }
     }
@@ -969,21 +1109,21 @@ let%expect_test "completes from a module" =
       "textEdit": {
         "newText": "mapi",
         "range": {
-          "end": { "character": 14, "line": 0 },
-          "start": { "character": 13, "line": 0 }
+          "start": { "line": 0, "character": 13 },
+          "end": { "line": 0, "character": 14 }
         }
       }
     }
     {
-      "detail": "'a -> 'a list -> bool",
+      "detail": "'a @ local -> 'a list @ local -> bool",
       "kind": 12,
       "label": "mem",
       "sortText": "0003",
       "textEdit": {
         "newText": "mem",
         "range": {
-          "end": { "character": 14, "line": 0 },
-          "start": { "character": 13, "line": 0 }
+          "start": { "line": 0, "character": 13 },
+          "end": { "line": 0, "character": 14 }
         }
       }
     }
@@ -995,8 +1135,8 @@ let%expect_test "completes from a module" =
       "textEdit": {
         "newText": "mem_assoc",
         "range": {
-          "end": { "character": 14, "line": 0 },
-          "start": { "character": 13, "line": 0 }
+          "start": { "line": 0, "character": 13 },
+          "end": { "line": 0, "character": 14 }
         }
       }
     }
@@ -1008,21 +1148,21 @@ let%expect_test "completes from a module" =
       "textEdit": {
         "newText": "mem_assq",
         "range": {
-          "end": { "character": 14, "line": 0 },
-          "start": { "character": 13, "line": 0 }
+          "start": { "line": 0, "character": 13 },
+          "end": { "line": 0, "character": 14 }
         }
       }
     }
     {
-      "detail": "'a -> 'a list -> bool",
+      "detail": "'a @ local -> 'a list @ local -> bool",
       "kind": 12,
       "label": "memq",
       "sortText": "0006",
       "textEdit": {
         "newText": "memq",
         "range": {
-          "end": { "character": 14, "line": 0 },
-          "start": { "character": 13, "line": 0 }
+          "start": { "line": 0, "character": 13 },
+          "end": { "line": 0, "character": 14 }
         }
       }
     }
@@ -1034,8 +1174,8 @@ let%expect_test "completes from a module" =
       "textEdit": {
         "newText": "merge",
         "range": {
-          "end": { "character": 14, "line": 0 },
-          "start": { "character": 13, "line": 0 }
+          "start": { "line": 0, "character": 13 },
+          "end": { "line": 0, "character": 14 }
         }
       }
     }
@@ -1045,7 +1185,9 @@ let%expect_test "completes from a module" =
 let%expect_test "completes a module name" =
   let source = {ocaml|let f = L|ocaml} in
   let position = Position.create ~line:0 ~character:9 in
-  let%map () = print_completions ~pre_print:(List.take 5) source position in
+  let%map () =
+    print_completions ~pre_print:(fun l -> Core.List.take l 5) source position
+  in
   [%expect
     {|
     Completions:
@@ -1057,8 +1199,8 @@ let%expect_test "completes a module name" =
       "textEdit": {
         "newText": "LargeFile",
         "range": {
-          "end": { "character": 9, "line": 0 },
-          "start": { "character": 8, "line": 0 }
+          "start": { "line": 0, "character": 8 },
+          "end": { "line": 0, "character": 9 }
         }
       }
     }
@@ -1070,8 +1212,8 @@ let%expect_test "completes a module name" =
       "textEdit": {
         "newText": "Lazy",
         "range": {
-          "end": { "character": 9, "line": 0 },
-          "start": { "character": 8, "line": 0 }
+          "start": { "line": 0, "character": 8 },
+          "end": { "line": 0, "character": 9 }
         }
       }
     }
@@ -1083,8 +1225,8 @@ let%expect_test "completes a module name" =
       "textEdit": {
         "newText": "Lexing",
         "range": {
-          "end": { "character": 9, "line": 0 },
-          "start": { "character": 8, "line": 0 }
+          "start": { "line": 0, "character": 8 },
+          "end": { "line": 0, "character": 9 }
         }
       }
     }
@@ -1096,8 +1238,8 @@ let%expect_test "completes a module name" =
       "textEdit": {
         "newText": "List",
         "range": {
-          "end": { "character": 9, "line": 0 },
-          "start": { "character": 8, "line": 0 }
+          "start": { "line": 0, "character": 8 },
+          "end": { "line": 0, "character": 9 }
         }
       }
     }
@@ -1109,8 +1251,8 @@ let%expect_test "completes a module name" =
       "textEdit": {
         "newText": "ListLabels",
         "range": {
-          "end": { "character": 9, "line": 0 },
-          "start": { "character": 8, "line": 0 }
+          "start": { "line": 0, "character": 8 },
+          "end": { "line": 0, "character": 9 }
         }
       }
     }
@@ -1137,164 +1279,6 @@ let%expect_test "completion doesn't autocomplete record fields" =
       source
       position
   in
-  (* We expect 0 completions*)
+  (* We expect 0 completions *)
   [%expect {| No completions |}]
-;;
-
-let%expect_test "completion for `in` keyword - no prefix" =
-  let source =
-    {ocaml|
-let foo param1 =
-  let bar = param1 |ocaml}
-  in
-  let position = Position.create ~line:2 ~character:19 in
-  let%map () = print_completions ~limit:3 source position in
-  [%expect
-    {|
-    Completions:
-    {
-      "kind": 14,
-      "label": "in",
-      "textEdit": {
-        "newText": "in",
-        "range": {
-          "end": { "character": 19, "line": 2 },
-          "start": { "character": 19, "line": 2 }
-        }
-      }
-    }
-    {
-      "detail": "'a -> 'b",
-      "kind": 12,
-      "label": "param1",
-      "sortText": "0000",
-      "textEdit": {
-        "newText": "param1",
-        "range": {
-          "end": { "character": 19, "line": 2 },
-          "start": { "character": 19, "line": 2 }
-        }
-      }
-    }
-    {
-      "detail": "'a ref -> 'a",
-      "kind": 12,
-      "label": "!",
-      "sortText": "0001",
-      "textEdit": {
-        "newText": "!",
-        "range": {
-          "end": { "character": 19, "line": 2 },
-          "start": { "character": 19, "line": 2 }
-        }
-      }
-    }
-    .............
-    |}]
-;;
-
-let%expect_test "completion for `in` keyword - prefix i" =
-  let source =
-    {ocaml|
-let foo param1 =
-  let bar = param1 i
-|ocaml}
-  in
-  let position = Position.create ~line:2 ~character:20 in
-  let%map () = print_completions ~limit:3 source position in
-  [%expect
-    {|
-    Completions:
-    {
-      "kind": 14,
-      "label": "in",
-      "textEdit": {
-        "newText": "in",
-        "range": {
-          "end": { "character": 20, "line": 2 },
-          "start": { "character": 19, "line": 2 }
-        }
-      }
-    }
-    {
-      "detail": "'a -> unit",
-      "kind": 12,
-      "label": "ignore",
-      "sortText": "0000",
-      "textEdit": {
-        "newText": "ignore",
-        "range": {
-          "end": { "character": 20, "line": 2 },
-          "start": { "character": 19, "line": 2 }
-        }
-      }
-    }
-    {
-      "detail": "'a @ local once contended -> unit",
-      "kind": 12,
-      "label": "ignore_contended",
-      "sortText": "0001",
-      "textEdit": {
-        "newText": "ignore_contended",
-        "range": {
-          "end": { "character": 20, "line": 2 },
-          "start": { "character": 19, "line": 2 }
-        }
-      }
-    }
-    .............
-    |}]
-;;
-
-let%expect_test "completion for `in` keyword - prefix in" =
-  let source =
-    {ocaml|
-let foo param1 =
-  let bar = param1 in
-|ocaml}
-  in
-  let position = Position.create ~line:2 ~character:21 in
-  let%map () = print_completions ~limit:3 source position in
-  [%expect
-    {|
-    Completions:
-    {
-      "kind": 14,
-      "label": "in",
-      "textEdit": {
-        "newText": "in",
-        "range": {
-          "end": { "character": 21, "line": 2 },
-          "start": { "character": 19, "line": 2 }
-        }
-      }
-    }
-    {
-      "detail": "in_channel -> int",
-      "kind": 12,
-      "label": "in_channel_length",
-      "sortText": "0000",
-      "textEdit": {
-        "newText": "in_channel_length",
-        "range": {
-          "end": { "character": 21, "line": 2 },
-          "start": { "character": 19, "line": 2 }
-        }
-      }
-    }
-    {
-      "detail": "int ref -> unit",
-      "kind": 12,
-      "label": "incr",
-      "sortText": "0001",
-      "textEdit": {
-        "newText": "incr",
-        "range": {
-          "end": { "character": 21, "line": 2 },
-          "start": { "character": 19, "line": 2 }
-        }
-      }
-    }
-    .............
-    |}]
 ;;

@@ -1,6 +1,8 @@
 open Import
 open Fiber.O
 
+let priority = Priorities.folding_range
+
 let folding_range { Range.start; end_ } =
   FoldingRange.create
     ~startLine:start.line
@@ -69,8 +71,8 @@ let fold_over_parsetree (parsetree : Mreader.parsetree) =
         push range;
         Ast_iterator.default_iterator.module_expr self module_expr
       | _ ->
-        (* We rely on the wildcard pattern to improve compatibility with
-           multiple OCaml's parsetree versions *)
+        (* We rely on the wildcard pattern to improve compatibility with multiple OCaml's
+           parsetree versions *)
         Ast_iterator.default_iterator.module_expr self module_expr
     in
     let class_declaration
@@ -146,8 +148,6 @@ let fold_over_parsetree (parsetree : Mreader.parsetree) =
           push { Range.start = lident_range.end_; end_ = pat_range.end_ })
       | Ppat_var _ | Ppat_alias _ | Ppat_constant _ | Ppat_interval _ | Ppat_tuple _
       | Ppat_unboxed_tuple (_, _)
-      | Ppat_unboxed_unit
-      | Ppat_unboxed_bool _
       | Ppat_construct _
       | Ppat_variant _
       | Ppat_array _
@@ -159,6 +159,9 @@ let fold_over_parsetree (parsetree : Mreader.parsetree) =
       | Ppat_exception _
       | Ppat_extension _
       | Ppat_open _
+      | Ppat_unboxed_bool _
+      | Ppat_unboxed_unit
+      | Ppat_effect _
       | Ppat_any -> Ast_iterator.default_iterator.pat self p
     in
     let expr (self : Ast_iterator.iterator) (expr : Parsetree.expression) =
@@ -168,8 +171,8 @@ let fold_over_parsetree (parsetree : Mreader.parsetree) =
         self.expr self e;
         self.cases self cases
       | Pexp_letop letop ->
-        (* Location is not correct. It include the location of the whole
-           expression. See: https://github.com/ocaml/ocaml/pull/10682 *)
+        (* Location is not correct. It include the location of the whole expression. See:
+           https://github.com/ocaml/ocaml/pull/10682 *)
         let range = Range.of_loc letop.let_.pbop_loc in
         push range;
         Ast_iterator.default_iterator.expr self expr
@@ -190,7 +193,8 @@ let fold_over_parsetree (parsetree : Mreader.parsetree) =
       | Pexp_for _
       | Pexp_object _
       | Pexp_pack _
-      | Pexp_letmodule _ ->
+      | Pexp_letmodule _
+      | Pexp_quote _ ->
         Range.of_loc expr.pexp_loc |> push;
         Ast_iterator.default_iterator.expr self expr
       | Pexp_extension _
@@ -225,11 +229,10 @@ let fold_over_parsetree (parsetree : Mreader.parsetree) =
       | Pexp_hole
       | Pexp_overwrite _
       | Pexp_idx _
-      | Pexp_unboxed_unit
+      | Pexp_splice _
       | Pexp_unboxed_bool _
-      | Pexp_borrow _
-      | Pexp_quote _
-      | Pexp_splice _ -> Ast_iterator.default_iterator.expr self expr
+      | Pexp_unboxed_unit
+      | Pexp_borrow _ -> Ast_iterator.default_iterator.expr self expr
     in
     let module_binding
       (self : Ast_iterator.iterator)
@@ -313,7 +316,7 @@ let compute ~log_info (state : State.t) (params : FoldingRangeParams.t) =
     | `Other -> Fiber.return None
     | `Merlin m ->
       let+ ranges =
-        Document.Merlin.with_pipeline_exn ~log_info m (fun pipeline ->
+        Document.Merlin.with_pipeline_exn ~log_info ~priority m (fun pipeline ->
           let parsetree = Mpipeline.reader_parsetree pipeline in
           fold_over_parsetree parsetree)
       in

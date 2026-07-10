@@ -1,3 +1,5 @@
+module Fiber = Ocaml_lsp_fiber
+
 type 'a t =
   { value : 'a Fiber.Ivar.t
   ; mutable f : (unit -> 'a Fiber.t) option

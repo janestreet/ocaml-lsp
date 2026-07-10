@@ -1,3 +1,4 @@
+module Fiber = Ocaml_lsp_fiber
 open Async
 open Test.Import
 open Lsp_helpers
@@ -69,8 +70,8 @@ let foo = 123
               {
                 "newText": "(foo : int)",
                 "range": {
-                  "end": { "character": 7, "line": 1 },
-                  "start": { "character": 4, "line": 1 }
+                  "start": { "line": 1, "character": 4 },
+                  "end": { "line": 1, "character": 7 }
                 }
               }
             ],
@@ -109,8 +110,8 @@ let f x = Foo x
               {
                 "newText": "(x : int)",
                 "range": {
-                  "end": { "character": 7, "line": 2 },
-                  "start": { "character": 6, "line": 2 }
+                  "start": { "line": 2, "character": 6 },
+                  "end": { "line": 2, "character": 7 }
                 }
               }
             ],
@@ -148,8 +149,8 @@ let iiii = 3 + 4
               {
                 "newText": "(iiii : int)",
                 "range": {
-                  "end": { "character": 8, "line": 1 },
-                  "start": { "character": 4, "line": 1 }
+                  "start": { "line": 1, "character": 4 },
+                  "end": { "line": 1, "character": 8 }
                 }
               }
             ],
@@ -205,8 +206,8 @@ let () =
               {
                 "newText": "(x : int)",
                 "range": {
-                  "end": { "character": 7, "line": 1 },
-                  "start": { "character": 6, "line": 1 }
+                  "start": { "line": 1, "character": 6 },
+                  "end": { "line": 1, "character": 7 }
                 }
               }
             ],
@@ -246,8 +247,8 @@ let f (x : t) = x
               {
                 "newText": "(x : t)",
                 "range": {
-                  "end": { "character": 17, "line": 3 },
-                  "start": { "character": 16, "line": 3 }
+                  "start": { "line": 3, "character": 16 },
+                  "end": { "line": 3, "character": 17 }
                 }
               }
             ],
@@ -350,8 +351,8 @@ let f (x : t) = Foo x
               {
                 "newText": "x",
                 "range": {
-                  "end": { "character": 13, "line": 2 },
-                  "start": { "character": 6, "line": 2 }
+                  "start": { "line": 2, "character": 6 },
+                  "end": { "line": 2, "character": 13 }
                 }
               }
             ],
@@ -391,8 +392,8 @@ let (iiii : int) = 3 + 4
               {
                 "newText": "iiii",
                 "range": {
-                  "end": { "character": 16, "line": 1 },
-                  "start": { "character": 4, "line": 1 }
+                  "start": { "line": 1, "character": 4 },
+                  "end": { "line": 1, "character": 16 }
                 }
               }
             ],
@@ -435,8 +436,8 @@ let f (x : int) = x + 1
               {
                 "newText": "x",
                 "range": {
-                  "end": { "character": 15, "line": 1 },
-                  "start": { "character": 6, "line": 1 }
+                  "start": { "line": 1, "character": 6 },
+                  "end": { "line": 1, "character": 15 }
                 }
               }
             ],
@@ -476,8 +477,8 @@ let x = (7 : int :> int)
               {
                 "newText": "7",
                 "range": {
-                  "end": { "character": 16, "line": 1 },
-                  "start": { "character": 9, "line": 1 }
+                  "start": { "line": 1, "character": 9 },
+                  "end": { "line": 1, "character": 16 }
                 }
               }
             ],
@@ -535,8 +536,8 @@ let f (x : t) = x
               {
                 "newText": "match x with | Foo _ -> _ | Bar _ -> _",
                 "range": {
-                  "end": { "character": 17, "line": 2 },
-                  "start": { "character": 16, "line": 2 }
+                  "start": { "line": 2, "character": 16 },
+                  "end": { "line": 2, "character": 17 }
                 }
               }
             ],
@@ -577,8 +578,8 @@ let f (x:bool) =
               {
                 "newText": "match x with\n  | false -> _\n  | true -> _",
                 "range": {
-                  "end": { "character": 9, "line": 2 },
-                  "start": { "character": 2, "line": 2 }
+                  "start": { "line": 2, "character": 2 },
+                  "end": { "line": 2, "character": 9 }
                 }
               }
             ],
@@ -618,8 +619,8 @@ let%expect_test "can destruct match-with line" =
               {
                 "newText": "match Ok 0 with\n    | Ok _ -> _\n    | Error _ -> _",
                 "range": {
-                  "end": { "character": 21, "line": 1 },
-                  "start": { "character": 4, "line": 1 }
+                  "start": { "line": 1, "character": 4 },
+                  "end": { "line": 1, "character": 21 }
                 }
               }
             ],
@@ -659,8 +660,8 @@ let%expect_test "can destruct match-with line with parentheses" =
               {
                 "newText": "match 0 with\n    | 0 -> _\n    | _ -> _",
                 "range": {
-                  "end": { "character": 17, "line": 1 },
-                  "start": { "character": 5, "line": 1 }
+                  "start": { "line": 1, "character": 5 },
+                  "end": { "line": 1, "character": 17 }
                 }
               }
             ],
@@ -701,8 +702,8 @@ let%expect_test "can destruct match line with let =" =
               {
                 "newText": "match Ok 0 with\n    | Ok _ -> _\n    | Error _ -> _",
                 "range": {
-                  "end": { "character": 25, "line": 1 },
-                  "start": { "character": 13, "line": 1 }
+                  "start": { "line": 1, "character": 13 },
+                  "end": { "line": 1, "character": 25 }
                 }
               }
             ],
@@ -749,8 +750,8 @@ let f (x: q) =
               {
                 "newText": "\n  | A -> _\n  | B -> _\n  | D -> _",
                 "range": {
-                  "end": { "character": 10, "line": 8 },
-                  "start": { "character": 10, "line": 8 }
+                  "start": { "line": 8, "character": 10 },
+                  "end": { "line": 8, "character": 10 }
                 }
               }
             ],
@@ -792,8 +793,8 @@ let zip (type a b) (xs : a list) (ys : b list) : (a * b) list =
               {
                 "newText": "([], _) -> _\n  | (_::_, _)",
                 "range": {
-                  "end": { "character": 10, "line": 3 },
-                  "start": { "character": 4, "line": 3 }
+                  "start": { "line": 3, "character": 4 },
+                  "end": { "line": 3, "character": 10 }
                 }
               }
             ],
@@ -840,8 +841,8 @@ let f (x: q) =
               {
                 "newText": "A -> _\n  | B -> _\n  | C -> _\n  | D",
                 "range": {
-                  "end": { "character": 5, "line": 8 },
-                  "start": { "character": 4, "line": 8 }
+                  "start": { "line": 8, "character": 4 },
+                  "end": { "line": 8, "character": 5 }
                 }
               }
             ],
@@ -888,8 +889,8 @@ let f (x: q) =
               {
                 "newText": "A -> _\n  | B -> _\n  | C -> _\n  | D",
                 "range": {
-                  "end": { "character": 5, "line": 8 },
-                  "start": { "character": 4, "line": 8 }
+                  "start": { "line": 8, "character": 4 },
+                  "end": { "line": 8, "character": 5 }
                 }
               }
             ],
@@ -935,8 +936,8 @@ let f (x: t) =
               {
                 "newText": "match x with\n  | Very_long_name_for_for_the_first_case_so_that_merlin_will_use_multiple_lines -> _\n  | Almost_as_long_name_for_for_the_second_case -> _\n  | Another_long_name_for_for_the_third_case -> _",
                 "range": {
-                  "end": { "character": 14, "line": 7 },
-                  "start": { "character": 2, "line": 7 }
+                  "start": { "line": 7, "character": 2 },
+                  "end": { "line": 7, "character": 14 }
                 }
               }
             ],
@@ -984,8 +985,8 @@ let f (x: q) =
               {
                 "newText": "\n  | Very_long_name_for_for_the_first_case_so_that_merlin_will_be_forced_to_use_multiple_lines -> _\n  | Another_long_name_for_for_the_third_case -> _\n  | Very_long_name_for_for_the_last_case_so_that_we_can_make_sure_we_handle_both_parens_and_line_breaks      _ -> _",
                 "range": {
-                  "end": { "character": 52, "line": 9 },
-                  "start": { "character": 52, "line": 9 }
+                  "start": { "line": 9, "character": 52 },
+                  "end": { "line": 9, "character": 52 }
                 }
               }
             ],
@@ -1031,8 +1032,8 @@ let f (x:_t) =
               {
                 "newText": "match x with\n  | A (_, _) -> _\n  | B _ -> _",
                 "range": {
-                  "end": { "character": 14, "line": 7 },
-                  "start": { "character": 2, "line": 7 }
+                  "start": { "line": 7, "character": 2 },
+                  "end": { "line": 7, "character": 14 }
                 }
               }
             ],
@@ -1081,8 +1082,8 @@ let f (x : t) = x
               {
                 "newText": "type t = Foo of int | Bar of bool\nval f : t -> t\n",
                 "range": {
-                  "end": { "character": 0, "line": 0 },
-                  "start": { "character": 0, "line": 0 }
+                  "start": { "line": 0, "character": 0 },
+                  "end": { "line": 0, "character": 0 }
                 }
               }
             ],
@@ -1135,8 +1136,8 @@ val f : t -> t
               {
                 "newText": "type t = Foo of int | Bar of bool\n",
                 "range": {
-                  "end": { "character": 0, "line": 0 },
-                  "start": { "character": 0, "line": 0 }
+                  "start": { "line": 0, "character": 0 },
+                  "end": { "line": 0, "character": 0 }
                 }
               }
             ],
@@ -1193,8 +1194,8 @@ val f : t -> bool
               {
                 "newText": "val f : t -> bool -> bool\n",
                 "range": {
-                  "end": { "character": 17, "line": 2 },
-                  "start": { "character": 0, "line": 2 }
+                  "start": { "line": 2, "character": 0 },
+                  "end": { "line": 2, "character": 17 }
                 }
               }
             ],
@@ -1247,8 +1248,8 @@ val f : int -> string -> 'a list -> bool -> bool
               {
                 "newText": "val f : int -> string -> bool -> bool\n",
                 "range": {
-                  "end": { "character": 48, "line": 1 },
-                  "start": { "character": 0, "line": 1 }
+                  "start": { "line": 1, "character": 0 },
+                  "end": { "line": 1, "character": 48 }
                 }
               }
             ],
@@ -1301,8 +1302,8 @@ val f : int -> string -> 'a list -> bool -> bool
               {
                 "newText": "val f : int -> 'a list -> 'b list -> bool -> bool\n",
                 "range": {
-                  "end": { "character": 48, "line": 1 },
-                  "start": { "character": 0, "line": 1 }
+                  "start": { "line": 1, "character": 0 },
+                  "end": { "line": 1, "character": 48 }
                 }
               }
             ],
@@ -1367,15 +1368,15 @@ val h : int -> bool
               {
                 "newText": "val g :\n  int ->\n  int ->\n  int ->\n  another_arg:int -> yet_another_arg:int -> keep_them_coming:int -> int\n",
                 "range": {
-                  "end": { "character": 10, "line": 7 },
-                  "start": { "character": 0, "line": 5 }
+                  "start": { "line": 5, "character": 0 },
+                  "end": { "line": 7, "character": 10 }
                 }
               },
               {
                 "newText": "val h : float -> float\n",
                 "range": {
-                  "end": { "character": 19, "line": 10 },
-                  "start": { "character": 0, "line": 10 }
+                  "start": { "line": 10, "character": 0 },
+                  "end": { "line": 10, "character": 19 }
                 }
               }
             ],
@@ -1437,8 +1438,8 @@ module M : sig type t = I of int | B of bool end
               {
                 "newText": "module M :\n  sig\n    type t = I of int | F of float\n    val f : t -> long_name_for_an_integer_argument:int -> int\n  end\n",
                 "range": {
-                  "end": { "character": 48, "line": 1 },
-                  "start": { "character": 0, "line": 1 }
+                  "start": { "line": 1, "character": 0 },
+                  "end": { "line": 1, "character": 48 }
                 }
               }
             ],
@@ -1483,8 +1484,8 @@ let%expect_test "can combine cases with multiple RHSes" =
               {
                 "newText": "    | King | Queen | Jack | Number _ -> _\n",
                 "range": {
-                  "end": { "character": 0, "line": 7 },
-                  "start": { "character": 0, "line": 3 }
+                  "start": { "line": 3, "character": 0 },
+                  "end": { "line": 7, "character": 0 }
                 }
               }
             ],
@@ -1529,8 +1530,8 @@ let%expect_test "can combine cases with one unique RHS" =
               {
                 "newText": "    | King | Queen -> \"Face card!\"\n",
                 "range": {
-                  "end": { "character": 0, "line": 5 },
-                  "start": { "character": 0, "line": 3 }
+                  "start": { "line": 3, "character": 0 },
+                  "end": { "line": 5, "character": 0 }
                 }
               }
             ],
@@ -1574,8 +1575,8 @@ let rec zip_shortest (xs : 'a list) (ys : 'b list) : ('a * 'b) list =
               {
                 "newText": "[]",
                 "range": {
-                  "end": { "character": 23, "line": 4 },
-                  "start": { "character": 22, "line": 4 }
+                  "start": { "line": 4, "character": 22 },
+                  "end": { "line": 4, "character": 23 }
                 }
               }
             ],
@@ -1595,8 +1596,8 @@ let rec zip_shortest (xs : 'a list) (ys : 'b list) : ('a * 'b) list =
               {
                 "newText": "(_ :: _)",
                 "range": {
-                  "end": { "character": 23, "line": 4 },
-                  "start": { "character": 22, "line": 4 }
+                  "start": { "line": 4, "character": 22 },
+                  "end": { "line": 4, "character": 23 }
                 }
               }
             ],
@@ -1616,8 +1617,8 @@ let rec zip_shortest (xs : 'a list) (ys : 'b list) : ('a * 'b) list =
               {
                 "newText": "(zip_shortest _ _)",
                 "range": {
-                  "end": { "character": 23, "line": 4 },
-                  "start": { "character": 22, "line": 4 }
+                  "start": { "line": 4, "character": 22 },
+                  "end": { "line": 4, "character": 23 }
                 }
               }
             ],
@@ -1632,8 +1633,6 @@ let rec zip_shortest (xs : 'a list) (ys : 'b list) : ('a * 'b) list =
     |}]
 ;;
 
-(* NOTE: This test is currently demonstrating a bug with Merlin-construct.
-   It should be updated to remove [x] from the options once that bug is fixed. *)
 let%expect_test "can construct with local variables" =
   let source =
     {ocaml|
@@ -1663,8 +1662,8 @@ let rec zip_shortest (xs : 'a list) (ys : 'b list) : ('a * 'b) list =
               {
                 "newText": "[]",
                 "range": {
-                  "end": { "character": 50, "line": 4 },
-                  "start": { "character": 49, "line": 4 }
+                  "start": { "line": 4, "character": 49 },
+                  "end": { "line": 4, "character": 50 }
                 }
               }
             ],
@@ -1684,8 +1683,8 @@ let rec zip_shortest (xs : 'a list) (ys : 'b list) : ('a * 'b) list =
               {
                 "newText": "(_ :: _)",
                 "range": {
-                  "end": { "character": 50, "line": 4 },
-                  "start": { "character": 49, "line": 4 }
+                  "start": { "line": 4, "character": 49 },
+                  "end": { "line": 4, "character": 50 }
                 }
               }
             ],
@@ -1705,8 +1704,8 @@ let rec zip_shortest (xs : 'a list) (ys : 'b list) : ('a * 'b) list =
               {
                 "newText": "x",
                 "range": {
-                  "end": { "character": 50, "line": 4 },
-                  "start": { "character": 49, "line": 4 }
+                  "start": { "line": 4, "character": 49 },
+                  "end": { "line": 4, "character": 50 }
                 }
               }
             ],
@@ -1726,8 +1725,8 @@ let rec zip_shortest (xs : 'a list) (ys : 'b list) : ('a * 'b) list =
               {
                 "newText": "xs",
                 "range": {
-                  "end": { "character": 50, "line": 4 },
-                  "start": { "character": 49, "line": 4 }
+                  "start": { "line": 4, "character": 49 },
+                  "end": { "line": 4, "character": 50 }
                 }
               }
             ],
@@ -1747,8 +1746,8 @@ let rec zip_shortest (xs : 'a list) (ys : 'b list) : ('a * 'b) list =
               {
                 "newText": "ys",
                 "range": {
-                  "end": { "character": 50, "line": 4 },
-                  "start": { "character": 49, "line": 4 }
+                  "start": { "line": 4, "character": 49 },
+                  "end": { "line": 4, "character": 50 }
                 }
               }
             ],
@@ -1801,21 +1800,21 @@ let parse_selection src =
   src', Range.create ~start ~end_
 ;;
 
-let apply_code_action ?diagnostics title source range =
-  let open Option.O in
+let apply_code_action ?path ?diagnostics title source range =
   (* collect code action results *)
   let code_actions = ref None in
   let%map () =
-    iter_code_actions ?diagnostics ~source range (fun ca -> code_actions := Some ca)
+    iter_code_actions ?path ?diagnostics ~source range (fun ca -> code_actions := Some ca)
   in
-  let* m_code_actions = !code_actions in
-  let* code_actions = m_code_actions in
-  let* edit =
+  let open Core.Option.Let_syntax in
+  let%bind m_code_actions = !code_actions in
+  let%bind code_actions = m_code_actions in
+  let%bind edit =
     List.find_map code_actions ~f:(function
       | `CodeAction { title = t; edit = Some edit; _ } when t = title -> Some edit
       | _ -> None)
   in
-  let+ changes = edit.documentChanges in
+  let%map changes = edit.documentChanges in
   List.concat_map changes ~f:(function
     | `TextDocumentEdit x ->
       List.map x.edits ~f:(function
@@ -1823,11 +1822,11 @@ let apply_code_action ?diagnostics title source range =
           TextEdit.create ~newText:a.newText ~range:a.range
         | `TextEdit e -> e)
     | `CreateFile _ | `DeleteFile _ | `RenameFile _ -> [])
-  |> Test.apply_edits source
+  |> TextEdit.For_testing.apply_edits source
 ;;
 
-let code_action_test ~title source =
+let code_action_test ?path ~title source =
   let src, range = parse_selection source in
-  let%map result = apply_code_action title src range in
+  let%map result = apply_code_action ?path title src range in
   Option.iter result ~f:print_string
 ;;

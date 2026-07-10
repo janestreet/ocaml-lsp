@@ -1,4 +1,4 @@
-open Stdune
+module List = Base.List
 
 include struct
   open Lsp.Types
@@ -8,6 +8,8 @@ include struct
   module TextDocumentItem = TextDocumentItem
   module DidOpenTextDocumentParams = DidOpenTextDocumentParams
 end
+
+let printfn a = Printf.ksprintf print_endline a
 
 let test ~from ~to_ =
   let edits = Lsp.Diff.edit ~from ~to_ in
@@ -42,8 +44,8 @@ let%expect_test "from empty" =
       {
         "newText": "foobar",
         "range": {
-          "end": { "character": 0, "line": 0 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 0, "character": 0 }
         }
       }
     ]
@@ -55,8 +57,8 @@ let%expect_test "from empty" =
       {
         "newText": "foobar",
         "range": {
-          "end": { "character": 0, "line": 1 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 1, "character": 0 }
         }
       }
     ]
@@ -71,8 +73,8 @@ let%expect_test "from empty - with newline" =
       {
         "newText": "foobar\n",
         "range": {
-          "end": { "character": 0, "line": 0 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 0, "character": 0 }
         }
       }
     ]
@@ -87,8 +89,8 @@ let%expect_test "to empty" =
       {
         "newText": "",
         "range": {
-          "end": { "character": 0, "line": 1 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 1, "character": 0 }
         }
       }
     ]
@@ -108,8 +110,8 @@ let%expect_test "multiline" =
       {
         "newText": "baz\nbar\nxx\n",
         "range": {
-          "end": { "character": 0, "line": 1 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 1, "character": 0 }
         }
       }
     ]
@@ -124,8 +126,8 @@ let%expect_test "change a character" =
       {
         "newText": "xxx z xx",
         "range": {
-          "end": { "character": 0, "line": 1 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 1, "character": 0 }
         }
       }
     ]
@@ -140,8 +142,8 @@ let%expect_test "delete empty line" =
       {
         "newText": "",
         "range": {
-          "end": { "character": 0, "line": 2 },
-          "start": { "character": 0, "line": 1 }
+          "start": { "line": 1, "character": 0 },
+          "end": { "line": 2, "character": 0 }
         }
       }
     ]
@@ -168,15 +170,15 @@ z
       {
         "newText": "x\n",
         "range": {
-          "end": { "character": 0, "line": 1 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 1, "character": 0 }
         }
       },
       {
         "newText": "",
         "range": {
-          "end": { "character": 0, "line": 4 },
-          "start": { "character": 0, "line": 3 }
+          "start": { "line": 3, "character": 0 },
+          "end": { "line": 4, "character": 0 }
         }
       }
     ]
@@ -191,15 +193,15 @@ let%expect_test "regerssion test 2" =
       {
         "newText": "2\n",
         "range": {
-          "end": { "character": 0, "line": 0 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 0, "character": 0 }
         }
       },
       {
         "newText": "",
         "range": {
-          "end": { "character": 0, "line": 3 },
-          "start": { "character": 0, "line": 1 }
+          "start": { "line": 1, "character": 0 },
+          "end": { "line": 3, "character": 0 }
         }
       }
     ]
@@ -215,15 +217,15 @@ let%expect_test "regression test 3" =
       {
         "newText": "",
         "range": {
-          "end": { "character": 0, "line": 1 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 1, "character": 0 }
         }
       },
       {
         "newText": "XXX",
         "range": {
-          "end": { "character": 0, "line": 4 },
-          "start": { "character": 0, "line": 3 }
+          "start": { "line": 3, "character": 0 },
+          "end": { "line": 4, "character": 0 }
         }
       }
     ]
@@ -239,15 +241,15 @@ let%expect_test "regression test 4" =
       {
         "newText": "",
         "range": {
-          "end": { "character": 0, "line": 2 },
-          "start": { "character": 0, "line": 1 }
+          "start": { "line": 1, "character": 0 },
+          "end": { "line": 2, "character": 0 }
         }
       },
       {
         "newText": "",
         "range": {
-          "end": { "character": 0, "line": 4 },
-          "start": { "character": 0, "line": 3 }
+          "start": { "line": 3, "character": 0 },
+          "end": { "line": 4, "character": 0 }
         }
       }
     ]
@@ -262,15 +264,15 @@ let%expect_test "regression test 5" =
       {
         "newText": "",
         "range": {
-          "end": { "character": 0, "line": 1 },
-          "start": { "character": 0, "line": 0 }
+          "start": { "line": 0, "character": 0 },
+          "end": { "line": 1, "character": 0 }
         }
       },
       {
         "newText": "",
         "range": {
-          "end": { "character": 0, "line": 3 },
-          "start": { "character": 0, "line": 2 }
+          "start": { "line": 2, "character": 0 },
+          "end": { "line": 3, "character": 0 }
         }
       }
     ]

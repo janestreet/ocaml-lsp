@@ -1,12 +1,5 @@
-_build/
-_opam/
-.idea/
-.log/
-.vscode/
-node_modules/
-tmp/
-.DS_Store
-.merlin
+_build
 *.install
-*.log
-result
+*.merlin
+_opam
+

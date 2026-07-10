@@ -1,3 +1,4 @@
+module Fiber = Ocaml_lsp_fiber
 open Async
 open Test.Import
 
@@ -38,7 +39,10 @@ let hover_extended client position verbosity =
     in
     Some (Jsonrpc.Structured.t_of_yojson (`Assoc params))
   in
-  Client.request client (UnknownRequest { meth = "ocamllsp/hoverExtended"; params })
+  Client.request
+    client
+    (UnknownRequest
+       { meth = Lsp.Client_request.Custom_request_names.hover_extended; params })
 ;;
 
 let%expect_test "hover reference" =
@@ -67,15 +71,18 @@ let foo_value : foo = Some 1
     {
       "contents": { "kind": "plaintext", "value": "foo" },
       "range": {
-        "end": { "character": 13, "line": 3 },
-        "start": { "character": 4, "line": 3 }
+        "start": { "line": 3, "character": 4 },
+        "end": { "line": 3, "character": 13 }
       }
     }
     {
-      "contents": { "kind": "plaintext", "value": "int option" },
+      "contents": {
+        "kind": "plaintext",
+        "value": "int option\n***\nKind: immutable_data\n***\nMode: @ portable stateless unique static"
+      },
       "range": {
-        "end": { "character": 13, "line": 3 },
-        "start": { "character": 4, "line": 3 }
+        "start": { "line": 3, "character": 4 },
+        "end": { "line": 3, "character": 13 }
       }
     }
     |}]
@@ -102,8 +109,8 @@ let f a b c d e f g h i = 1 + a + b + c + d + e + f + g + h + i
         "value": "int -> int -> int -> int -> int -> int -> int -> int -> int -> int\n***\nAllocation: heap"
       },
       "range": {
-        "end": { "character": 5, "line": 1 },
-        "start": { "character": 4, "line": 1 }
+        "start": { "line": 1, "character": 4 },
+        "end": { "line": 1, "character": 5 }
       }
     }
     |}]
@@ -133,15 +140,18 @@ let foo_value : foo = Some 1
     {
       "contents": { "kind": "plaintext", "value": "foo" },
       "range": {
-        "end": { "character": 13, "line": 3 },
-        "start": { "character": 4, "line": 3 }
+        "start": { "line": 3, "character": 4 },
+        "end": { "line": 3, "character": 13 }
       }
     }
     {
-      "contents": { "kind": "plaintext", "value": "int option" },
+      "contents": {
+        "kind": "plaintext",
+        "value": "int option\n***\nKind: immutable_data\n***\nMode: @ portable stateless unique static"
+      },
       "range": {
-        "end": { "character": 13, "line": 3 },
-        "start": { "character": 4, "line": 3 }
+        "start": { "line": 3, "character": 4 },
+        "end": { "line": 3, "character": 13 }
       }
     }
     |}]
@@ -170,8 +180,8 @@ let foo_value : foo = Some 1
       "canDecreaseVerbosity": false,
       "contents": { "kind": "plaintext", "value": "foo" },
       "range": {
-        "end": { "character": 13, "line": 3 },
-        "start": { "character": 4, "line": 3 }
+        "start": { "line": 3, "character": 4 },
+        "end": { "line": 3, "character": 13 }
       }
     }
     |}]
@@ -200,8 +210,8 @@ let foo_value : foo = Some 1
       "canDecreaseVerbosity": false,
       "contents": { "kind": "plaintext", "value": "foo" },
       "range": {
-        "end": { "character": 13, "line": 3 },
-        "start": { "character": 4, "line": 3 }
+        "start": { "line": 3, "character": 4 },
+        "end": { "line": 3, "character": 13 }
       }
     }
     |}]
@@ -226,12 +236,15 @@ let foo_value : foo = Some 1
     {|
     {
       "verbosity": 1,
-      "canIncreaseVerbosity": false,
+      "canIncreaseVerbosity": true,
       "canDecreaseVerbosity": true,
-      "contents": { "kind": "plaintext", "value": "int option" },
+      "contents": {
+        "kind": "plaintext",
+        "value": "int option\n***\nKind: immutable_data\n***\nMode: @ portable stateless unique static"
+      },
       "range": {
-        "end": { "character": 13, "line": 3 },
-        "start": { "character": 4, "line": 3 }
+        "start": { "line": 3, "character": 4 },
+        "end": { "line": 3, "character": 13 }
       }
     }
     |}]
@@ -256,12 +269,15 @@ let foo_value : foo = Some 1
     {|
     {
       "verbosity": 2,
-      "canIncreaseVerbosity": false,
+      "canIncreaseVerbosity": true,
       "canDecreaseVerbosity": true,
-      "contents": { "kind": "plaintext", "value": "int option" },
+      "contents": {
+        "kind": "plaintext",
+        "value": "int option\n***\nKind: value non_float mod forkable unyielding many stateless immutable\n***\nMode: @ global portable uncontended read_write stateless unique many forkable unyielding static"
+      },
       "range": {
-        "end": { "character": 13, "line": 3 },
-        "start": { "character": 4, "line": 3 }
+        "start": { "line": 3, "character": 4 },
+        "end": { "line": 3, "character": 13 }
       }
     }
     |}]
@@ -294,28 +310,34 @@ let foo_value : foo = Some 1
       "canDecreaseVerbosity": false,
       "contents": { "kind": "plaintext", "value": "foo" },
       "range": {
-        "end": { "character": 13, "line": 3 },
-        "start": { "character": 4, "line": 3 }
+        "start": { "line": 3, "character": 4 },
+        "end": { "line": 3, "character": 13 }
       }
     }
     {
       "verbosity": 1,
-      "canIncreaseVerbosity": false,
+      "canIncreaseVerbosity": true,
       "canDecreaseVerbosity": true,
-      "contents": { "kind": "plaintext", "value": "int option" },
+      "contents": {
+        "kind": "plaintext",
+        "value": "int option\n***\nKind: immutable_data\n***\nMode: @ portable stateless unique static"
+      },
       "range": {
-        "end": { "character": 13, "line": 3 },
-        "start": { "character": 4, "line": 3 }
+        "start": { "line": 3, "character": 4 },
+        "end": { "line": 3, "character": 13 }
       }
     }
     {
       "verbosity": 2,
-      "canIncreaseVerbosity": false,
+      "canIncreaseVerbosity": true,
       "canDecreaseVerbosity": true,
-      "contents": { "kind": "plaintext", "value": "int option" },
+      "contents": {
+        "kind": "plaintext",
+        "value": "int option\n***\nKind: value non_float mod forkable unyielding many stateless immutable\n***\nMode: @ global portable uncontended read_write stateless unique many forkable unyielding static"
+      },
       "range": {
-        "end": { "character": 13, "line": 3 },
-        "start": { "character": 4, "line": 3 }
+        "start": { "line": 3, "character": 4 },
+        "end": { "line": 3, "character": 13 }
       }
     }
     |}]
@@ -338,15 +360,15 @@ let f a b c d e f g h i = 1 + a + b + c + d + e + f + g + h + i
     {|
     {
       "verbosity": 0,
-      "canIncreaseVerbosity": false,
+      "canIncreaseVerbosity": true,
       "canDecreaseVerbosity": false,
       "contents": {
         "kind": "plaintext",
         "value": "int -> int -> int -> int -> int -> int -> int -> int -> int -> int\n***\nAllocation: heap"
       },
       "range": {
-        "end": { "character": 5, "line": 1 },
-        "start": { "character": 4, "line": 1 }
+        "start": { "line": 1, "character": 4 },
+        "end": { "line": 1, "character": 5 }
       }
     }
     |}]
@@ -372,15 +394,15 @@ let f g x y =
     {|
     {
       "verbosity": 0,
-      "canIncreaseVerbosity": false,
+      "canIncreaseVerbosity": true,
       "canDecreaseVerbosity": false,
       "contents": {
         "kind": "plaintext",
         "value": "'a -> 'a option\n***\nSome\n***\nAllocation: heap"
       },
       "range": {
-        "end": { "character": 6, "line": 3 },
-        "start": { "character": 2, "line": 3 }
+        "start": { "line": 3, "character": 2 },
+        "end": { "line": 3, "character": 6 }
       }
     }
     |}]
@@ -406,27 +428,20 @@ let f g x y =
     {|
     {
       "verbosity": 0,
-      "canIncreaseVerbosity": false,
+      "canIncreaseVerbosity": true,
       "canDecreaseVerbosity": false,
       "contents": {
         "kind": "plaintext",
         "value": "'a -> 'a option\n***\nSome\n***\nAllocation: stack"
       },
       "range": {
-        "end": { "character": 15, "line": 3 },
-        "start": { "character": 11, "line": 3 }
+        "start": { "line": 3, "character": 11 },
+        "end": { "line": 3, "character": 15 }
       }
     }
     |}]
 ;;
 
-(* NOTE: This only seems to work on the character to the right of the +
-
-   This looks like a bug in the stack-or-heap-enclosing query where it returns the
-   range 2:11 - 2:12 when called on the +, instead of 2:12 - 2:13 like it should.
-
-   Merlin devs will look into fixing this.
-*)
 let%expect_test "no relevant allocation to show" =
   let source =
     {ocaml|
@@ -447,15 +462,15 @@ let f g x y =
     {|
     {
       "verbosity": 0,
-      "canIncreaseVerbosity": false,
+      "canIncreaseVerbosity": true,
       "canDecreaseVerbosity": false,
       "contents": {
         "kind": "plaintext",
         "value": "int -> int -> int\n***\nInteger addition.\n    Left-associative operator, see {!Ocaml_operators} for more information.\n***\nAllocation: no relevant allocation to show"
       },
       "range": {
-        "end": { "character": 13, "line": 2 },
-        "start": { "character": 12, "line": 2 }
+        "start": { "line": 2, "character": 12 },
+        "end": { "line": 2, "character": 13 }
       }
     }
     |}]
@@ -481,15 +496,15 @@ let f g x y =
     {|
     {
       "verbosity": 0,
-      "canIncreaseVerbosity": false,
+      "canIncreaseVerbosity": true,
       "canDecreaseVerbosity": false,
       "contents": {
         "kind": "plaintext",
         "value": "'a option\n***\nNone\n***\nAllocation: not an allocation (constructor without arguments)"
       },
       "range": {
-        "end": { "character": 6, "line": 3 },
-        "start": { "character": 2, "line": 3 }
+        "start": { "line": 3, "character": 2 },
+        "end": { "line": 3, "character": 6 }
       }
     }
     |}]
@@ -515,15 +530,15 @@ let f g x y =
     {|
     {
       "verbosity": 0,
-      "canIncreaseVerbosity": false,
+      "canIncreaseVerbosity": true,
       "canDecreaseVerbosity": false,
       "contents": {
         "kind": "plaintext",
         "value": "'a -> 'a option\n***\nSome\n***\nAllocation: could be stack or heap"
       },
       "range": {
-        "end": { "character": 14, "line": 2 },
-        "start": { "character": 10, "line": 2 }
+        "start": { "line": 2, "character": 10 },
+        "end": { "line": 2, "character": 14 }
       }
     }
     |}]
@@ -548,16 +563,231 @@ let f g =
     {|
     {
       "verbosity": 0,
-      "canIncreaseVerbosity": false,
+      "canIncreaseVerbosity": true,
       "canDecreaseVerbosity": false,
       "contents": {
         "kind": "plaintext",
         "value": "'a -> 'b\n***\nAllocation: stack"
       },
       "range": {
-        "end": { "character": 23, "line": 2 },
-        "start": { "character": 11, "line": 2 }
+        "start": { "line": 2, "character": 11 },
+        "end": { "line": 2, "character": 23 }
       }
     }
+    |}]
+;;
+
+let%expect_test "can hover a ppx" =
+  let source =
+    {ocaml|
+    let%expect "testception" =
+      print_endline "boo!";
+      [%expect {| boo! |}]
+    ;;
+    |ocaml}
+  in
+  let position = Position.create ~line:3 ~character:12 in
+  let req client =
+    let* resp = hover_extended client position None in
+    let () = print_hover_extended resp in
+    Fiber.return ()
+  in
+  let%map.Deferred () = Helpers.test source req in
+  [%expect
+    {xxx|
+    {
+      "verbosity": 0,
+      "canIncreaseVerbosity": false,
+      "canDecreaseVerbosity": false,
+      "contents": {
+        "value": "(* ppx expect expansion *)\n[%expect {| boo! |}]",
+        "language": "ocaml"
+      },
+      "range": {
+        "start": { "line": 3, "character": 6 },
+        "end": { "line": 3, "character": 26 }
+      }
+    }
+    |xxx}]
+;;
+
+let hover_verbosity_test ~source ~position ~verbosity =
+  let req client =
+    let* resp = hover_extended client position (Some verbosity) in
+    let open Yojson.Safe.Util in
+    let hover_contents = resp |> member "contents" |> member "value" |> to_string in
+    let can_increase_verbosity = resp |> member "canIncreaseVerbosity" |> to_bool in
+    print_endline ("canIncreaseVerbosity: " ^ Bool.to_string can_increase_verbosity);
+    print_newline ();
+    print_endline hover_contents;
+    Fiber.return ()
+  in
+  Helpers.test source req
+;;
+
+let%expect_test "kind verbosity" =
+  let source =
+    {ocaml|
+type foo : value mod portable
+|ocaml}
+  in
+  let position = Position.create ~line:1 ~character:5 in
+  let%bind.Deferred () = hover_verbosity_test ~source ~position ~verbosity:0 in
+  [%expect
+    {|
+    canIncreaseVerbosity: true
+
+    type foo : value mod portable
+    |}];
+  let%bind.Deferred () = hover_verbosity_test ~source ~position ~verbosity:1 in
+  [%expect
+    {|
+    canIncreaseVerbosity: true
+
+    type foo : value mod portable
+    ***
+    Kind: value mod portable
+    |}];
+  let%bind.Deferred () = hover_verbosity_test ~source ~position ~verbosity:2 in
+  [%expect
+    {|
+    canIncreaseVerbosity: false
+
+    type foo : value mod portable
+    ***
+    Kind:
+    value separable non_null
+      mod portable
+          local
+          unforkable
+          yielding
+          once
+          stateful
+          unique
+          read_write
+          uncontended
+          static
+          internal
+    |}];
+  let%map.Deferred () = hover_verbosity_test ~source ~position ~verbosity:3 in
+  [%expect
+    {|
+    canIncreaseVerbosity: false
+
+    type foo : value mod portable
+    ***
+    Kind:
+    value separable non_null
+      mod portable
+          local
+          unforkable
+          yielding
+          once
+          stateful
+          unique
+          read_write
+          uncontended
+          static
+          internal
+    |}]
+;;
+
+let%expect_test "kind abbreviation verbosity" =
+  let source =
+    {ocaml|
+type foo : immediate
+|ocaml}
+  in
+  let position = Position.create ~line:1 ~character:5 in
+  let%bind.Deferred () = hover_verbosity_test ~source ~position ~verbosity:0 in
+  [%expect
+    {|
+    canIncreaseVerbosity: true
+
+    type foo : immediate
+    |}];
+  let%bind.Deferred () = hover_verbosity_test ~source ~position ~verbosity:1 in
+  [%expect
+    {|
+    canIncreaseVerbosity: true
+
+    type foo : immediate
+    ***
+    Kind: immediate
+    |}];
+  let%bind.Deferred () = hover_verbosity_test ~source ~position ~verbosity:2 in
+  [%expect
+    {|
+    canIncreaseVerbosity: true
+
+    type foo : immediate
+    ***
+    Kind: value non_pointer mod global many stateless immutable external_
+    |}];
+  let%map.Deferred () = hover_verbosity_test ~source ~position ~verbosity:3 in
+  [%expect
+    {|
+    canIncreaseVerbosity: false
+
+    type foo : immediate
+    ***
+    Kind:
+    value non_pointer non_null
+      mod global
+          many
+          stateless
+          immutable
+          forkable
+          unyielding
+          aliased
+          portable
+          contended
+          external_
+          static
+    |}]
+;;
+
+let%expect_test "mode verbosity" =
+  let source =
+    {ocaml|
+let counter = ref 0
+let (f @ portable) () =
+  let _ = counter in
+  ()
+|ocaml}
+  in
+  let position = Position.create ~line:3 ~character:13 in
+  let%bind.Deferred () = hover_verbosity_test ~source ~position ~verbosity:0 in
+  [%expect
+    {|
+    canIncreaseVerbosity: true
+
+    int ref
+    |}];
+  let%bind.Deferred () = hover_verbosity_test ~source ~position ~verbosity:1 in
+  [%expect
+    {|
+    canIncreaseVerbosity: true
+
+    int ref
+
+    type ('a : value_or_null) ref = { mutable contents : 'a; }
+    ***
+    Kind: mutable_data
+    ***
+    Mode: @ portable contended stateless
+    |}];
+  let%map.Deferred () = hover_verbosity_test ~source ~position ~verbosity:2 in
+  [%expect
+    {|
+    canIncreaseVerbosity: true
+
+    int ref
+
+    type ('a : value_or_null) ref = { mutable contents : 'a; }
+    ***
+    Kind: value non_float mod forkable unyielding many stateless
+    ***
+    Mode: @ global portable contended read_write stateless aliased many forkable unyielding dynamic
     |}]
 ;;

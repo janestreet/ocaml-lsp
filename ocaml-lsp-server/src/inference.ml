@@ -1,9 +1,12 @@
 open Import
 open Fiber.O
 module Printtyp = Merlin_analysis.Type_utils.Printtyp
+module Format_doc = Ocaml_utils.Format_doc
+
+let priority = Priorities.code_action
 
 let get_typer ~log_info doc =
-  Document.Merlin.with_pipeline_exn ~log_info doc (fun pipeline ->
+  Document.Merlin.with_pipeline_exn ~log_info ~priority doc (fun pipeline ->
     Mpipeline.typer_result pipeline)
 ;;
 
@@ -37,10 +40,10 @@ let infer_missing_intf_for_impl ~log_info impl_doc intf_doc =
        let* intf_cfg = Document.Merlin.mconfig intf in
        let verbosity = intf_cfg.query.verbosity in
        Printtyp.wrap_printing_env ~verbosity env (fun () ->
-         Format.asprintf "%a@." Printtyp.Compat.signature sig_update)
+         Format.asprintf "%a@." Printtyp.signature sig_update)
        |> Fiber.return
-     | _ -> Code_error.raise "promblem encountered with Merlin typer_result" [])
-  | _ -> Code_error.raise "expected implementation and interface documents" []
+     | _ -> Code_error.raise_s [%message "promblem encountered with Merlin typer_result"])
+  | _ -> Code_error.raise_s [%message "expected implementation and interface documents"]
 ;;
 
 (* No longer involved in the insert-interface code action, but still used by the
@@ -48,11 +51,13 @@ let infer_missing_intf_for_impl ~log_info impl_doc intf_doc =
 let infer_intf_for_impl ~log_info doc =
   match Document.kind doc with
   | `Other ->
-    Code_error.raise "expected an implementation document, got a non merlin document" []
+    Code_error.raise_s
+      [%message "expected an implementation document, got a non merlin document"]
   | `Merlin m when Document.Merlin.kind m = Intf ->
-    Code_error.raise "expected an implementation document, got an interface instead" []
+    Code_error.raise_s
+      [%message "expected an implementation document, got an interface instead"]
   | `Merlin doc ->
-    Document.Merlin.with_pipeline_exn ~log_info doc (fun pipeline ->
+    Document.Merlin.with_pipeline_exn ~log_info ~priority doc (fun pipeline ->
       let typer = Mpipeline.typer_result pipeline in
       let sig_ : Types.signature =
         let typedtree = Mtyper.get_typedtree typer in
@@ -63,14 +68,15 @@ let infer_intf_for_impl ~log_info doc =
       let env = Mtyper.initial_env typer in
       let verbosity = (Mpipeline.final_config pipeline).query.verbosity in
       Printtyp.wrap_printing_env ~verbosity env (fun () ->
-        Format.asprintf "%a@." Printtyp.Compat.signature sig_))
+        Format.asprintf "%a@." Printtyp.signature sig_))
 ;;
 
 let infer_intf ~log_info (state : State.t) intf_doc =
   match Document.kind intf_doc with
-  | `Other -> Code_error.raise "the provided document is not a merlin source." []
+  | `Other ->
+    Code_error.raise_s [%message "the provided document is not a merlin source."]
   | `Merlin m when Document.Merlin.kind m = Impl ->
-    Code_error.raise "the provided document is not an interface." []
+    Code_error.raise_s [%message "the provided document is not an interface."]
   | `Merlin m ->
     Fiber.of_thunk (fun () ->
       let intf_uri = Document.uri intf_doc in
@@ -99,6 +105,7 @@ let top_level_id (item : Typedtree.signature_item) =
   | Typedtree.Tsig_modsubst { ms_id; _ } -> Some ms_id
   | Typedtree.Tsig_modtype { mtd_id; _ } -> Some mtd_id
   | Typedtree.Tsig_modtypesubst { mtd_id; _ } -> Some mtd_id
+  | Typedtree.Tsig_jkind { jkind_id; _ } -> Some jkind_id
   | Typedtree.Tsig_type _
   | Typedtree.Tsig_typesubst _
   | Typedtree.Tsig_typext _
@@ -108,7 +115,6 @@ let top_level_id (item : Typedtree.signature_item) =
   | Typedtree.Tsig_include _
   | Typedtree.Tsig_class _
   | Typedtree.Tsig_class_type _
-  | Typedtree.Tsig_jkind _
   | Typedtree.Tsig_attribute _ -> None
 ;;
 
@@ -157,10 +163,6 @@ let select_matching_range ~first ~last sig_type_list =
 (** Formats both the old and new signatures as they would appear in the interface. If they
     differ, create a text edit that updates to the new signature. *)
 let text_edit_opt shared_signature ~formatter =
-  (* NOTE: We're relying on string equivalence of how the two signatures are printed to
-     decide if there's been an update. It'd be nice to check some sort of logical
-     equivalence on the actual types and then only format the ones that differ, but that's
-     not practical with the type information we have easy access to. *)
   let+ sig_strings =
     Fiber.parallel_map ~f:formatter [ shared_signature.old_sig; shared_signature.new_sig ]
   in
@@ -175,11 +177,12 @@ let text_edit_opt shared_signature ~formatter =
 let build_signature_edits
   ~(old_intf : Typedtree.signature)
   ~((* Extracted by Merlin from the interface. *)
-   range : Range.t)
+      range : Range.t)
   ~((* Selected range in the interface. *)
-   new_sigs : Types.signature)
+      new_sigs : Types.signature)
   ~((* Inferred by Merlin from the implementation. *)
-   formatter : Types.signature_item -> string Fiber.t)
+      formatter :
+      Types.signature_item -> string Fiber.t)
   =
   (* These are [Typedtree.signature_item]s, and we need them for the location. *)
   let in_range_tree_items =
@@ -229,13 +232,6 @@ let update_signatures
     | None -> Fiber.return []
     | Some impl_doc ->
       let impl_merlin = Document.merlin_exn impl_doc in
-      (* NOTE: These calls to Merlin to get the type information (and the subsequent
-         processing we do with it) are expensive on large documents. This can cause
-         problems if someone is trying to invoke some other code action, because the LSP
-         currently determines which CAs are possible by trying them all. We've decided for
-         now to allow slow code actions (especially since users are less likely to be
-         doing lots of little CAs in the mli file) and think more about the broader CA
-         protocol in the future. *)
       let* typers =
         Fiber.parallel_map [ intf_merlin; impl_merlin ] ~f:(get_typer ~log_info)
       in
@@ -249,9 +245,9 @@ let update_signatures
            let env = Mtyper.initial_env intf_typer in
            Fiber.return
              (Printtyp.wrap_printing_env ~verbosity env (fun () ->
-                Format.asprintf "%a@." Printtyp.Compat.signature [ sig_item ]))
+                Format.asprintf "%a@." Printtyp.signature [ sig_item ]))
          in
          let new_sigs = get_doc_signature impl_typer in
          build_signature_edits ~old_intf ~new_sigs ~range ~formatter
-       | _ -> Code_error.raise "expected an interface" []))
+       | _ -> Code_error.raise_s [%message "expected an interface"]))
 ;;

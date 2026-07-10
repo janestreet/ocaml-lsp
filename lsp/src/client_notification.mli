@@ -1,6 +1,14 @@
 open! Import
 open Types
 
+module CustomNotification : sig
+  type t =
+    | HumanDidOpen of DidHumanOpenParams.t
+    | HumanDidClose of DidHumanCloseParams.t
+
+  val capabilities : (string * Json.t) list
+end
+
 type t =
   | TextDocumentDidOpen of DidOpenTextDocumentParams.t
   | TextDocumentDidClose of DidCloseTextDocumentParams.t
@@ -23,6 +31,7 @@ type t =
   | NotebookDocumentDidChange of DidChangeNotebookDocumentParams.t
   | NotebookDocumentDidSave of DidSaveNotebookDocumentParams.t
   | NotebookDocumentDidClose of DidCloseNotebookDocumentParams.t
+  | CustomNotification of CustomNotification.t
   | UnknownNotification of Jsonrpc.Notification.t
 
 (** This is a to_string function. It's exposed for use in logging. *)
@@ -30,4 +39,5 @@ val method_ : t -> string
 
 val of_jsonrpc : Jsonrpc.Notification.t -> (t, string) result
 val to_jsonrpc : t -> Jsonrpc.Notification.t
-val all_uris : t -> Uri0.t list
+val primary_uri : t -> Uri0.t option
+val other_uris : t -> Uri0.t list option

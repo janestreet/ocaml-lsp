@@ -1,0 +1,10 @@
+(rule
+ (target ocaml_lsp_css_lsp.ml)
+ (deps ocaml_lsp_css_lsp.oss-specific.ml)
+ (action
+  (copy ocaml_lsp_css_lsp.oss-specific.ml ocaml_lsp_css_lsp.ml)))
+
+(library
+ (name ocaml_lsp_css_lsp)
+ (modules ocaml_lsp_css_lsp)
+ (libraries lsp merlin-lib.kernel merlin-lib.ocaml_parsing))

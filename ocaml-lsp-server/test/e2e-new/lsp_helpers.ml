@@ -1,3 +1,4 @@
+module Fiber = Ocaml_lsp_fiber
 open Test.Import
 
 let open_document ~client ~uri ~source =
@@ -12,14 +13,18 @@ let open_document ~client ~uri ~source =
 let create_handler_with_diagnostics_callback ~got_diagnostics ~diagnostics_callback =
   (* Calls [diagnostics_callback] and fills [got_diagnostics] when receiving diagnostics. *)
   Client.Handler.make
-    ~on_notification:(fun _ -> function
+    ~on_notification:(fun _ n ~event_index:_ ->
+      match n with
       | PublishDiagnostics diagnostics ->
         diagnostics_callback diagnostics;
         let* diag = Fiber.Ivar.peek got_diagnostics in
-        (match diag with
-         | Some _ -> Fiber.return ()
-         | None -> Fiber.Ivar.fill got_diagnostics ())
-      | _ -> Fiber.return ())
+        let+ r =
+          match diag with
+          | Some _ -> Fiber.return ()
+          | None -> Fiber.Ivar.fill got_diagnostics ()
+        in
+        r, None
+      | _ -> Fiber.return ((), None))
     ()
 ;;
 
@@ -40,7 +45,16 @@ let create_client client =
 let open_document_with_client ~prep ~path ~source client =
   let* (_ : InitializeResult.t) = Client.initialized client in
   let* () =
-    let settings = `Assoc [ "merlinDiagnostics", `Assoc [ "enable", `Bool true ] ] in
+    let settings =
+      `Assoc
+        [ ( "whichDiagnostics"
+          , `Assoc
+              [ "merlin_syntax", `Bool true
+              ; "merlin_typing", `Bool true
+              ; "dune", `Bool false
+              ] )
+        ]
+    in
     Client.notification client (ChangeConfiguration { settings })
   in
   let uri = DocumentUri.of_path path in
@@ -83,6 +97,8 @@ let iter_lsp_response
 let open_document_with_diagnostics_callback
   ?(prep = fun _ -> Fiber.return ())
   ?(path = "foo.ml")
+  ?cwd
+  ?extra_env
   ~source
   ~diagnostics_callback
   ()
@@ -91,7 +107,7 @@ let open_document_with_diagnostics_callback
   let handler =
     create_handler_with_diagnostics_callback ~got_diagnostics ~diagnostics_callback
   in
-  Test.run ~handler
+  Test.run ~handler ?cwd ?extra_env
   @@ fun client ->
   let run_client = create_client client in
   let open_document = open_document_with_client ~prep ~path ~source client in

@@ -1,25 +1,17 @@
-(* All modules from [Stdune] should be in the struct below. The modules are
-   listed alphabetically. Try to keep the order. *)
+module Fiber = Ocaml_lsp_fiber
+module Code_error = Ocaml_lsp_stdune.Code_error
+module Exn_with_backtrace = Ocaml_lsp_stdune.Exn_with_backtrace
+module Fdecl = Ocaml_lsp_stdune.Fdecl
+module Comparable = Core.Comparable
+module Hashtbl = Core.Hashtbl
+module Int = Core.Int
+module Map = Core.Map
+module Pid = Core.Pid
+module Poly = Core.Poly
+module Tuple = Core.Tuple
+module Sexp = Core.Sexp
 
-include struct
-  open Stdune
-  module Code_error = Code_error
-  module Comparable = Comparable
-  module Exn_with_backtrace = Exn_with_backtrace
-  module Fdecl = Fdecl
-  module Fpath = Path
-  module Int = Int
-  module Table = Table
-  module Tuple = Tuple
-  module Unix_env = Env
-  module Io = Io
-  module Map = Map
-  module Monoid = Monoid
-  module Pid = Pid
-  module Poly = Poly
-
-  let sprintf = sprintf
-end
+let sprintf = Printf.sprintf
 
 include struct
   open Base
@@ -39,52 +31,42 @@ include struct
   end
 end
 
-module List = struct
-  include Stdune.List
-  open Base.List
-
-  let findi xs ~f = findi xs ~f
-  let find_mapi xs ~f = find_mapi xs ~f
-  let sub xs ~pos ~len = sub xs ~pos ~len
-  let hd_exn t = hd_exn t
-  let nth_exn t n = nth_exn t n
-  let hd t = hd t
-  let filter t ~f = filter t ~f
-  let tl t = tl t
-  let drop xs i = drop xs i
-end
+module List = Base.List
 
 module Result = struct
-  module O = Stdune.Result.O
+  module O = struct
+    let ( let+ ) x f = Base.Result.map x ~f
+    let ( let* ) x f = Base.Result.bind x ~f
+  end
+
   include Base.Result
 end
 
 module Option = struct
-  module O = Stdune.Option.O
-  module List = Stdune.Option.List
+  module O = struct
+    let ( let+ ) x f = Base.Option.map x ~f
+    let ( let* ) x f = Base.Option.bind x ~f
+  end
+
   include Base.Option
 end
 
 module String = struct
-  include Stdune.String
+  include Base.String
 
-  let strip = trim
+  let capitalize_ascii = Base.String.capitalize
+  let drop_prefix_if_exists = Base.String.chop_prefix_if_exists
+  let lowercase_ascii = Base.String.lowercase
+  let starts_with ~prefix s = Base.String.is_prefix s ~prefix
+  let strip = strip
+  let trim = Base.String.strip
 
-  include struct
-    open Base.String
-
-    let chop_prefix_if_exists = chop_prefix_if_exists
-    let chop_suffix_if_exists = chop_suffix_if_exists
-    let substr_index_exn = substr_index_exn
-    let substr_index = substr_index
-    let prefix = prefix
-    let lfindi = lfindi
-    let filter = filter
-  end
+  module Map = Core.String.Map
+  module Table = Core.String.Table
 
   let findi =
     let rec loop s len ~f i =
-      if i >= len
+      if Int.(i >= len)
       then None
       else if f (String.unsafe_get s i)
       then Some i
@@ -95,14 +77,17 @@ module String = struct
       let from =
         match from with
         | None -> 0
-        | Some i -> if i > len - 1 then Code_error.raise "findi: invalid from" [] else i
+        | Some i ->
+          if Int.(i > len - 1)
+          then Code_error.raise_s [%message "findi: invalid from"]
+          else i
       in
       loop s len ~f from
   ;;
 
   let rfindi =
     let rec loop s ~f i =
-      if i < 0
+      if Int.(i < 0)
       then None
       else if f (String.unsafe_get s i)
       then Some i
@@ -113,7 +98,10 @@ module String = struct
         let len = String.length s in
         match from with
         | None -> len - 1
-        | Some i -> if i > len - 1 then Code_error.raise "rfindi: invalid from" [] else i
+        | Some i ->
+          if Int.(i > len - 1)
+          then Code_error.raise_s [%message "rfindi: invalid from"]
+          else i
       in
       loop s ~f from
   ;;
@@ -129,14 +117,22 @@ include struct
   module Text_document = Text_document
 
   module Uri = struct
-    include Uri
+    module T = struct
+      include Uri
 
-    let to_dyn t = Dyn.string (to_string t)
+      let to_dyn t = Dyn.string (to_string t)
+    end
+
+    include T
+    module Table = Core.Hashtbl.Make_plain (T)
   end
 end
 
 (* Misc modules *)
-module Drpc = Dune_rpc
+module Drpc = Ocaml_lsp_dune_integration.Dune_rpc
+module Feature_id = Ocaml_lsp_remote_lsp.Feature_id
+module Fiber_async = Ocaml_lsp_fiber_shims.Fiber_async
+module File_path = File_path
 
 (* OCaml frontend *)
 module Ast_iterator = Ocaml_parsing.Ast_iterator
@@ -156,27 +152,15 @@ module Loc = struct
 
   include T
 
-  module Map = Map.Make (struct
+  module Map = Map.Make_plain (struct
       include T
 
-      let compare x x' = Ordering.of_int (compare x x')
-
-      let position_to_dyn (pos : Lexing.position) =
-        Dyn.Record
-          [ "pos_fname", Dyn.String pos.pos_fname
-          ; "pos_lnum", Dyn.Int pos.pos_lnum
-          ; "pos_bol", Dyn.Int pos.pos_bol
-          ; "pos_cnum", Dyn.Int pos.pos_cnum
-          ]
-      ;;
-
-      let to_dyn loc =
-        Dyn.Record
-          [ "loc_start", position_to_dyn loc.loc_start
-          ; "loc_end", position_to_dyn loc.loc_end
-          ; "loc_ghost", Dyn.Bool loc.loc_ghost
-          ]
-      ;;
+      type nonrec t = Ocaml_parsing.Location.t = private
+        { loc_start : Core.Source_code_position.t
+        ; loc_end : Core.Source_code_position.t
+        ; loc_ghost : Core.Bool.t
+        }
+      [@@deriving sexp_of]
     end)
 end
 
@@ -209,19 +193,26 @@ module Warnings = Ocaml_utils.Warnings
 module Browse_raw = Merlin_specific.Browse_raw
 module Format = Merlin_utils.Std.Format
 
-(* All modules from [Lsp_fiber] should be in the struct below. The modules are
-   listed alphabetically. Try to keep the order. *)
+(* All modules from [Lsp_fiber] should be in the struct below. The modules are listed
+   alphabetically. Try to keep the order. *)
 include struct
   open Lsp_fiber
   module Log = Private.Log
+  module Notify = Rpc.Notify
   module Reply = Rpc.Reply
   module Server = Server
   module Lazy_fiber = Lsp_fiber.Lazy_fiber
   module Json = Json
 end
 
-(* All modules from [Lsp.Types] should be in the struct below. The modules are
-   listed alphabetically. Try to keep the order. *)
+include struct
+  open Priority_lsp_executor_lib
+  module Priority_lsp_executor = Priority_lsp_executor
+  module Priority = Priority
+end
+
+(* All modules from [Lsp.Types] should be in the struct below. The modules are listed
+   alphabetically. Try to keep the order. *)
 include struct
   open Lsp.Types
 
@@ -296,6 +287,7 @@ include struct
   module OptionalVersionedTextDocumentIdentifier = OptionalVersionedTextDocumentIdentifier
   module ParameterInformation = ParameterInformation
   module PositionEncodingKind = PositionEncodingKind
+  module PrepareRenameParams = PrepareRenameParams
   module ProgressParams = ProgressParams
   module ProgressToken = ProgressToken
   module PublishDiagnosticsParams = PublishDiagnosticsParams
@@ -360,12 +352,28 @@ include struct
   module WorkspaceFoldersServerCapabilities = WorkspaceFoldersServerCapabilities
 end
 
+module Log_info = Ocaml_lsp_logging.Log_info
+module Css_lsp = Ocaml_lsp_css_lsp
+module Metrics = Ocaml_lsp_metrics
+module Version = Ocaml_lsp_version
+
 let task_if_running pool ~f =
   let open Fiber.O in
   let* running = Fiber.Pool.running pool in
   match running with
   | false -> Fiber.return ()
   | true -> Fiber.Pool.task pool ~f
+;;
+
+(* We implement fold over Fiber computations ourselves as Fiber does not expose modules
+   like [Async.Deferred.List]. *)
+let rec fold_left_fiber ~init ~f l =
+  let open Fiber.O in
+  match l with
+  | [] -> Fiber.return init
+  | x :: xs ->
+    let* init = f init x in
+    fold_left_fiber ~init ~f xs
 ;;
 
 let inside_test = Env_vars._TEST () |> Option.value ~default:false

@@ -41,7 +41,7 @@ let to_jsonrpc t =
     | None -> None
     | Some s -> Some (Jsonrpc.Structured.t_of_yojson s)
   in
-  { Jsonrpc.Notification.params; method_ }
+  { Jsonrpc.Notification.params; method_; event_index = None }
 ;;
 
 let of_jsonrpc (r : Jsonrpc.Notification.t) =

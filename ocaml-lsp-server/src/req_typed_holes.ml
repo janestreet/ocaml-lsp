@@ -1,27 +1,13 @@
 open Import
 open Fiber.O
 
+let priority = Priorities.typed_holes
 let capability = "handleTypedHoles", `Bool true
 let jump_capability = "jumpToHole", `Bool true
-let meth = "ocamllsp/typedHoles"
-let jump = "ocamllsp/jumpToHole"
-
-let get_doc_id ~(params : Jsonrpc.Structured.t option) =
-  match params with
-  | Some (`Assoc params) ->
-    List.assoc_opt "uri" params
-    |> Option.map ~f:(fun (param : Json.t) ->
-      let uri = DocumentUri.t_of_yojson param in
-      { TextDocumentIdentifier.uri })
-  | _ -> None
-;;
-
-let get_pos ~(params : Jsonrpc.Structured.t option) =
-  match params with
-  | Some (`Assoc params) ->
-    List.assoc_opt "position" params |> Option.map ~f:Position.t_of_yojson
-  | _ -> None
-;;
+let meth = Lsp.Client_request.Custom_request_names.typed_holes
+let jump = Lsp.Client_request.Custom_request_names.typed_holes_jump
+let get_doc_id = Util.get_doc_id
+let get_pos = Util.get_pos
 
 let raise_invalid_params ?data ~message () =
   Jsonrpc.Response.Error.raise
@@ -80,7 +66,9 @@ let get_holes_from_merlin ~log_info ~uri ~(state : State.t) =
     in
     raise_invalid_params ~message ()
   | Some doc ->
-    let+ holes = Document.Merlin.dispatch_exn ~log_info (Document.merlin_exn doc) Holes in
+    let+ holes =
+      Document.Merlin.dispatch_exn ~log_info ~priority (Document.merlin_exn doc) Holes
+    in
     List.map ~f:(fun (loc, _type) -> Range.of_loc loc) holes
 ;;
 

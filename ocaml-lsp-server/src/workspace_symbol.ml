@@ -56,9 +56,9 @@ let string_of_cm cm =
 ;;
 
 module Outline : sig
-  (* Like merlin's original outline but doesn't print any types. The types
-     useless anyway and make it impossible to run this concurrently to other
-     operations that involve the typer. *)
+  (* Like merlin's original outline but doesn't print any types. The types useless anyway
+     and make it impossible to run this concurrently to other operations that involve the
+     typer. *)
   val get : Merlin_analysis.Browse_tree.t list -> Query_protocol.item list
 end = struct
   module Location = Loc
@@ -70,17 +70,18 @@ end = struct
   open Browse_raw
   open Browse_tree
 
-  let id_of_patt = function
-    | { pat_desc = Tpat_var (id, _, _, _, _); _ } -> Some id
+  let name_of_patt = function
+    | { pat_desc = Tpat_var { name; _ }; _ } -> Some name
     | _ -> None
   ;;
 
-  let mk ?(children = []) ~location ~deprecated outline_kind id =
+  let mk ?(children = []) ~location ~deprecated outline_kind (id : string Location.loc) =
     { Query_protocol.outline_kind
     ; outline_type = None
     ; location
+    ; selection = id.loc
     ; children
-    ; outline_name = Ident.name id
+    ; outline_name = id.txt
     ; deprecated
     }
   ;;
@@ -96,30 +97,30 @@ end = struct
     match node.t_node with
     | Value_binding vb ->
       let deprecated = Type_utils.is_deprecated vb.vb_attributes in
-      (match id_of_patt vb.vb_pat with
+      (match name_of_patt vb.vb_pat with
        | None -> None
-       | Some ident -> Some (mk ~location ~deprecated `Value ident))
+       | Some name -> Some (mk ~location ~deprecated `Value name))
     | Value_description vd ->
       let deprecated = Type_utils.is_deprecated vd.val_attributes in
-      Some (mk ~location ~deprecated `Value vd.val_id)
+      Some (mk ~location ~deprecated `Value vd.val_name)
     | Module_declaration md ->
       let children = get_mod_children node in
-      (match md.md_id with
-       | None -> None
-       | Some id ->
+      (match md.md_name with
+       | { txt = None; _ } -> None
+       | { txt = Some txt; loc } ->
          let deprecated = Type_utils.is_deprecated md.md_attributes in
-         Some (mk ~children ~location ~deprecated `Module id))
+         Some (mk ~children ~location ~deprecated `Module { txt; loc }))
     | Module_binding mb ->
       let children = get_mod_children node in
-      (match mb.mb_id with
-       | None -> None
-       | Some id ->
+      (match mb.mb_name with
+       | { txt = None; _ } -> None
+       | { txt = Some name; loc } ->
          let deprecated = Type_utils.is_deprecated mb.mb_attributes in
-         Some (mk ~children ~location ~deprecated `Module id))
+         Some (mk ~children ~location ~deprecated `Module { txt = name; loc }))
     | Module_type_declaration mtd ->
       let children = get_mod_children node in
       let deprecated = Type_utils.is_deprecated mtd.mtd_attributes in
-      Some (mk ~deprecated ~children ~location `Modtype mtd.mtd_id)
+      Some (mk ~deprecated ~children ~location `Modtype mtd.mtd_name)
     | Type_declaration td ->
       let children =
         List.concat_map (Lazy.force node.t_children) ~f:(fun child ->
@@ -129,16 +130,16 @@ end = struct
               match x.t_node with
               | Constructor_declaration c ->
                 let deprecated = Type_utils.is_deprecated c.cd_attributes in
-                mk `Constructor c.cd_id ~deprecated ~location:c.cd_loc
+                mk `Constructor c.cd_name ~deprecated ~location:c.cd_loc
               | Label_declaration ld ->
                 let deprecated = Type_utils.is_deprecated ld.ld_attributes in
-                mk `Label ld.ld_id ~deprecated ~location:ld.ld_loc
+                mk `Label ld.ld_name ~deprecated ~location:ld.ld_loc
               | _ -> assert false
               (* ! *))
           | _ -> [])
       in
       let deprecated = Type_utils.is_deprecated td.typ_attributes in
-      Some (mk ~children ~location ~deprecated `Type td.typ_id)
+      Some (mk ~children ~location ~deprecated `Type td.typ_name)
     | Type_extension te ->
       let name = Path.name te.tyext_path in
       let children =
@@ -151,16 +152,17 @@ end = struct
         ; outline_kind = `Type
         ; outline_type = None
         ; location
+        ; selection = te.tyext_txt.loc
         ; children
         ; deprecated
         }
     | Extension_constructor ec ->
       let deprecated = Type_utils.is_deprecated ec.ext_attributes in
-      Some (mk ~location `Exn ec.ext_id ~deprecated)
+      Some (mk ~location `Exn ec.ext_name ~deprecated)
     | Class_declaration cd ->
       let children = List.concat_map (Lazy.force node.t_children) ~f:get_class_elements in
       let deprecated = Type_utils.is_deprecated cd.ci_attributes in
-      Some (mk ~children ~location `Class cd.ci_id_class_type ~deprecated)
+      Some (mk ~children ~location `Class cd.ci_id_name ~deprecated)
     | _ -> None
 
   and get_class_elements node =
@@ -177,7 +179,8 @@ end = struct
                { Query_protocol.outline_name = str_loc.Location.txt
                ; outline_kind
                ; outline_type = None
-               ; location = str_loc.Location.loc
+               ; location = cf.cf_loc
+               ; selection = str_loc.Location.loc
                ; children = []
                ; deprecated
                }
@@ -218,6 +221,7 @@ let outline_kind kind : SymbolKind.t =
   | `Type -> String
   | `Exn -> Constructor
   | `Class -> Class
+  | `ClassType -> Interface
   | `Method -> Method
 ;;
 
@@ -285,17 +289,18 @@ let find_cm_files dir =
       then loop acc path
       else (
         match String.rsplit2 ~on:'.' path with
-        | Some (path_without_ext, "cmt") -> String.Map.set acc path_without_ext (Cmt path)
+        | Some (path_without_ext, "cmt") ->
+          Map.set acc ~key:path_without_ext ~data:(Cmt path)
         | Some (path_without_ext, "cmti") ->
-          let current_file = String.Map.find acc path_without_ext in
+          let current_file = Map.find acc path_without_ext in
           let cmi_file = Cmti path in
           (match current_file with
-           | None -> String.Map.set acc path_without_ext cmi_file
+           | None -> Map.set acc ~key:path_without_ext ~data:cmi_file
            | Some current_file ->
-             String.Map.set acc path_without_ext (choose_file current_file cmi_file))
+             Map.set acc ~key:path_without_ext ~data:(choose_file current_file cmi_file))
         | _ -> acc))
   in
-  loop String.Map.empty dir |> String.Map.values
+  loop String.Map.empty dir |> Map.data
 ;;
 
 let run
@@ -365,8 +370,8 @@ let run server (state : State.t) (params : WorkspaceSymbolParams.t) =
          | Error (`Exn exn) -> Exn_with_backtrace.reraise exn)
     in
     List.partition_map symbols_results ~f:(function
-      | Ok r -> Left r
-      | Error e -> Right e)
+      | Ok r -> First r
+      | Error e -> Second e)
   in
   let+ () =
     match errors with

@@ -21,7 +21,8 @@ val meth : string
 val get_doc_id : params:Jsonrpc.Structured.t option -> TextDocumentIdentifier.t option
 
 val on_request
-  :  log_info:Lsp_timing_logger.t
+  :  log_info:Log_info.t
   -> params:Jsonrpc.Structured.t option
+  -> State.t Server.t
   -> State.t
   -> Json.t Fiber.t

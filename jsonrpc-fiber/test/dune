@@ -1,22 +1,6 @@
 (library
  (name jsonrpc_fiber_tests)
- (enabled_if
-  (>= %{ocaml_version} 4.08))
+ (libraries base fiber_test ocaml_lsp_fiber jsonrpc_fiber lsp_json_rpc_types yojson)
  (inline_tests)
- (libraries
-  base
-  dyn
-  fiber
-  fiber_test
-  jsonrpc
-  jsonrpc_fiber
-  ;; This is because of the (implicit_transitive_deps false)
-  ;; in dune-project
-  ppx_expect.config
-  ppx_expect.config_types
-  ppx_inline_test.config
-  ppx_expect.runtime_types
-  stdune
-  yojson)
- (preprocess
-  (pps ppx_expect)))
+ (flags (:standard -open Lsp_json_rpc_types -alert -private_lsp_library))
+ (preprocess (pps ppx_expect -expect-test-strict-indentation=false)))

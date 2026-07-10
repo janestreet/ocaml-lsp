@@ -1,5 +1,6 @@
 open! Import
 open Json.Conv
+module Diagnostic_parser = Ocaml_lsp_dune_integration.Diagnostic_parser
 
 module NotebookDocumentFilter = struct
   type t =
@@ -75,10 +76,13 @@ module NotebookDocumentSyncRegistrationOptions = struct
 end
 
 module MarkedString = struct
+  open Core.Bin_prot.Std
+
   type t =
     { value : string
     ; language : string option
     }
+  [@@deriving bin_io]
 
   let yojson_of_t { value; language } =
     match language with
@@ -306,6 +310,7 @@ module MarkupKind = struct
   type t =
     | PlainText
     | Markdown
+  [@@deriving bin_io]
 
   let yojson_of_t (t : t) : Json.t =
     match t with
@@ -728,26 +733,31 @@ end
 
 module WatchKind = struct
   type t =
-    | Create
-    | Change
-    | Delete
-    | Other of string
+    { create : bool
+    ; change : bool
+    ; delete : bool
+    }
+
+  let create ?(create = false) ?(change = false) ?(delete = false) () =
+    { create; change; delete }
+  ;;
 
   let yojson_of_t (t : t) : Json.t =
-    match t with
-    | Create -> `Int 1
-    | Change -> `Int 2
-    | Delete -> `Int 4
-    | Other s -> `String s
+    let n =
+      (if t.create then 1 else 0)
+      lor (if t.change then 2 else 0)
+      lor if t.delete then 4 else 0
+    in
+    `Int n
   ;;
 
   let t_of_yojson (json : Json.t) : t =
     match json with
-    | `Int 1 -> Create
-    | `Int 2 -> Change
-    | `Int 4 -> Delete
-    | `String s -> Other s
-    | _ -> Json.error "Invalid value. Expected one of: 1, 2,\n4" json
+    | `Int n ->
+      if n land lnot 7 <> 0
+      then Json.error "WatchKind has unexpected bits" json
+      else { create = n land 1 <> 0; change = n land 2 <> 0; delete = n land 4 <> 0 }
+    | _ -> Json.error "Expected int for WatchKind" json
   ;;
 end
 
@@ -1166,23 +1176,37 @@ module TextDocumentSaveReason = struct
 end
 
 module Position = struct
-  type t =
-    { character : int
-    ; line : int
+  open Core
+
+  type t = Diagnostic_parser.Diagnostic.Position.t =
+    { line : int
+    ; character : int
     }
-  [@@deriving yojson] [@@yojson.allow_extra_fields]
+  [@@deriving yojson, bin_io, compare, sexp_of] [@@yojson.allow_extra_fields]
 
   let create ~(character : int) ~(line : int) : t = { character; line }
+
+  let offset_of_position src (pos : t) =
+    let line_offset =
+      List.take (String.split_lines src) pos.line
+      |> List.fold_left ~init:0 ~f:(fun s l -> s + String.length l)
+    in
+    line_offset + pos.line (* account for line endings *) + pos.character
+  ;;
 end
 
 module Range = struct
-  type t =
-    { end_ : Position.t [@key "end"]
-    ; start : Position.t
+  type t = Diagnostic_parser.Diagnostic.Range.t =
+    { start : Position.t
+    ; end_ : Position.t [@key "end"]
     }
-  [@@deriving yojson] [@@yojson.allow_extra_fields]
+  [@@deriving yojson, bin_io, compare, sexp_of] [@@yojson.allow_extra_fields]
 
   let create ~(end_ : Position.t) ~(start : Position.t) : t = { end_; start }
+
+  let contains { start; end_ } ~(position : Position.t) =
+    position >= start && position < end_
+  ;;
 end
 
 module ChangeAnnotationIdentifier = struct
@@ -1350,6 +1374,39 @@ module TextEdit = struct
   [@@deriving yojson] [@@yojson.allow_extra_fields]
 
   let create ~(newText : string) ~(range : Range.t) : t = { newText; range }
+
+  module For_testing = struct
+    let apply_edits src edits =
+      let edits =
+        Base.List.sort edits ~compare:(fun (e : t) (e' : t) ->
+          Position.compare e.range.start e'.range.start)
+      in
+      (* check that edits are non-overlapping *)
+      let rec overlaps : t list -> _ = function
+        | [] | [ _ ] -> false
+        | e :: e' :: es ->
+          (match Base.Ordering.of_int (Position.compare e.range.end_ e'.range.start) with
+           | Greater -> true
+           | Less | Equal -> overlaps (e' :: es))
+      in
+      if overlaps edits then failwith "overlapping edits";
+      let _, edits =
+        (* compute start and end character offsets for each edit *)
+        List.map edits ~f:(fun (e : t) ->
+          ( e.newText
+          , Position.offset_of_position src e.range.start
+          , Position.offset_of_position src e.range.end_ ))
+        (* update the offsets to account for preceding edits *)
+        |> List.fold_left_map ~init:0 ~f:(fun offset (new_text, start, end_) ->
+          if end_ < start then failwith "invalid edit: end before start";
+          ( offset + (String.length new_text - (end_ - start))
+          , (new_text, start + offset, end_ + offset) ))
+      in
+      (* apply edits *)
+      List.fold_left edits ~init:src ~f:(fun src (new_text, start, end_) ->
+        Base.String.prefix src start ^ new_text ^ Base.String.drop_prefix src end_)
+    ;;
+  end
 end
 
 module TextDocumentEdit = struct
@@ -3216,7 +3273,7 @@ module Location = struct
     { range : Range.t
     ; uri : DocumentUri.t
     }
-  [@@deriving yojson] [@@yojson.allow_extra_fields]
+  [@@deriving yojson, bin_io, compare, sexp_of] [@@yojson.allow_extra_fields]
 
   let create ~(range : Range.t) ~(uri : DocumentUri.t) : t = { range; uri }
 end
@@ -3232,11 +3289,13 @@ module DiagnosticRelatedInformation = struct
 end
 
 module MarkupContent = struct
+  open Core.Bin_prot.Std
+
   type t =
     { kind : MarkupKind.t
     ; value : string
     }
-  [@@deriving yojson] [@@yojson.allow_extra_fields]
+  [@@deriving yojson, bin_io] [@@yojson.allow_extra_fields]
 
   let create ~(kind : MarkupKind.t) ~(value : string) : t = { kind; value }
 end
@@ -3310,6 +3369,22 @@ module Diagnostic = struct
     ; source
     ; tags
     }
+  ;;
+
+  let of_diagnostic_parser ?source ?tags (dp : Diagnostic_parser.Diagnostic.t) =
+    let severity =
+      Some
+        (match dp.severity with
+         | Error -> DiagnosticSeverity.Error
+         | Warning -> DiagnosticSeverity.Warning)
+    in
+    create
+      ~range:dp.location.range
+      ?severity
+      ?source
+      ~message:(`String dp.message)
+      ?tags
+      ()
   ;;
 end
 
@@ -5684,11 +5759,15 @@ module FoldingRangeRegistrationOptions = struct
 end
 
 module Hover = struct
+  (* NB: opening [Core] here overrides yojson's @default ppx, producing a type error. *)
+  open Core.Bin_prot.Std
+
   type contents_pvar =
     [ `MarkupContent of MarkupContent.t
     | `MarkedString of MarkedString.t
     | `List of MarkedString.t list
     ]
+  [@@deriving bin_io]
 
   let contents_pvar_of_yojson (json : Json.t) : contents_pvar =
     Json.Of.untagged_union
@@ -5711,7 +5790,7 @@ module Hover = struct
     { contents : contents_pvar
     ; range : Range.t Json.Nullable_option.t [@default None] [@yojson_drop_default ( = )]
     }
-  [@@deriving yojson] [@@yojson.allow_extra_fields]
+  [@@deriving yojson, bin_io] [@@yojson.allow_extra_fields]
 
   let create ~(contents : contents_pvar) ?(range : Range.t option) (() : unit) : t =
     { contents; range }
@@ -9153,5 +9232,40 @@ module Locations = struct
        | exception Of_yojson_error (_, _) ->
          `LocationLink (List.map ~f:LocationLink.t_of_yojson (x :: xs)))
     | _ -> Json.error "Locations.t" json
+  ;;
+
+  let first = function
+    | `LocationLink ((link : LocationLink.t) :: _) ->
+      Some { Location.uri = link.targetUri; range = link.targetRange }
+    | `Location (loc :: _) -> Some loc
+    | `Location [] | `LocationLink [] -> None
+  ;;
+end
+
+module DidHumanOpenParams = struct
+  type t = { textDocument : TextDocumentItem.t }
+  [@@deriving yojson] [@@yojson.allow_extra_fields]
+
+  let create ~(textDocument : TextDocumentItem.t) : t = { textDocument }
+end
+
+module DidHumanCloseParams = struct
+  type t = { textDocument : TextDocumentIdentifier.t }
+  [@@deriving yojson] [@@yojson.allow_extra_fields]
+
+  let create ~(textDocument : TextDocumentIdentifier.t) : t = { textDocument }
+end
+
+module Go_to_target = struct
+  type t =
+    | Definition
+    | Declaration
+    | Type_definition
+  [@@deriving bin_io, sexp]
+
+  let to_string = function
+    | Definition -> "definition"
+    | Declaration -> "declaration"
+    | Type_definition -> "type-definition"
   ;;
 end

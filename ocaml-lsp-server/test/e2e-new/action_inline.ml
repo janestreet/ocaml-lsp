@@ -667,3 +667,37 @@ let _ =
       (let _ = print_endline "hi" in 0)
     |}]
 ;;
+
+let%expect_test "inlining works with |>" =
+  let%map.Deferred () =
+    inline_test
+      {|
+let _ =
+  let $f x = x + 1 in
+  3 |> f
+|}
+  in
+  [%expect
+    {|
+    let _ =
+      let f x = x + 1 in
+      ((fun x -> x + 1) 3 f)
+    |}]
+;;
+
+let%expect_test "inlining works with non-punned labeled arguments" =
+  let%map.Deferred () =
+    inline_test
+      {|
+let _ =
+  let $function_to_inline x = x + 1 in
+  List.map [1; 2; 3] ~f:function_to_inline
+|}
+  in
+  [%expect
+    {|
+    let _ =
+      let function_to_inline x = x + 1 in
+      List.map [1; 2; 3] ~f:(fun x -> x + 1)
+    |}]
+;;

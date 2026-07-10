@@ -78,8 +78,8 @@ let tightest_enclosing_binder_position typedtree range =
         (match body with
          | Tfunction_body expr -> found_if_expr_contains expr
          | Tfunction_cases { fc_cases = cases; _ } -> found_if_case_contains cases)
-      | Texp_match (_, _, cases, _) -> found_if_case_contains cases
-      | Texp_try (_, cases) -> found_if_case_contains cases
+      | Texp_match (_, _, cases, _, _) -> found_if_case_contains cases
+      | Texp_try (_, _, cases) -> found_if_case_contains cases
       | _ -> ())
   in
   let structure_item_iter (iter : I.iterator) (item : Typedtree.structure_item) =
@@ -114,11 +114,12 @@ let free (expr : Typedtree.expression) =
   let idents = ref [] in
   let expr_iter (iter : I.iterator) (expr : Typedtree.expression) =
     match expr.exp_desc with
-    | Texp_ident (path, { txt = ident; _ }, _, _, _, _) -> idents := (ident, path) :: !idents
+    | Texp_ident { path; lid = { txt = ident; _ }; _ } ->
+      idents := (ident, path) :: !idents
     | _ ->
       I.default_iterator.expr iter expr;
-      (* if a variable was bound but is no longer, it must be associated with a
-         binder inside the expression *)
+      (* if a variable was bound but is no longer, it must be associated with a binder
+         inside the expression *)
       idents
       := List.filter !idents ~f:(fun (ident, path) ->
            match Env.find_value_by_name ident expr.exp_env with
@@ -166,7 +167,7 @@ let extract_function doc typedtree range =
       List.map free_vars ~f:(function
         | Longident.Lident id -> Some id
         | _ -> None)
-      |> Option.List.all
+      |> Core.Option.all
     in
     let s = String.concat ~sep:" " args in
     if String.is_empty s then "()" else s

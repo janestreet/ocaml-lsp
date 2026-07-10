@@ -1,3 +1,4 @@
+module Fiber = Ocaml_lsp_fiber
 open Test.Import
 open Async
 
@@ -62,8 +63,8 @@ let foo_value = foo ?a
       "textEdit": {
         "newText": "~aaa",
         "range": {
-          "end": { "character": 22, "line": 3 },
-          "start": { "character": 20, "line": 3 }
+          "start": { "line": 3, "character": 20 },
+          "end": { "line": 3, "character": 22 }
         }
       }
     }
@@ -75,8 +76,8 @@ let foo_value = foo ?a
       "textEdit": {
         "newText": "~aab",
         "range": {
-          "end": { "character": 22, "line": 3 },
-          "start": { "character": 20, "line": 3 }
+          "start": { "line": 3, "character": 20 },
+          "end": { "line": 3, "character": 22 }
         }
       }
     }
@@ -88,8 +89,8 @@ let foo_value = foo ?a
       "textEdit": {
         "newText": "~abb",
         "range": {
-          "end": { "character": 22, "line": 3 },
-          "start": { "character": 20, "line": 3 }
+          "start": { "line": 3, "character": 20 },
+          "end": { "line": 3, "character": 22 }
         }
       }
     }
@@ -102,8 +103,8 @@ let foo_value = foo ?a
       "textEdit": {
         "newText": "?aaa",
         "range": {
-          "end": { "character": 22, "line": 4 },
-          "start": { "character": 20, "line": 4 }
+          "start": { "line": 4, "character": 20 },
+          "end": { "line": 4, "character": 22 }
         }
       }
     }
@@ -115,8 +116,8 @@ let foo_value = foo ?a
       "textEdit": {
         "newText": "?aab",
         "range": {
-          "end": { "character": 22, "line": 4 },
-          "start": { "character": 20, "line": 4 }
+          "start": { "line": 4, "character": 20 },
+          "end": { "line": 4, "character": 22 }
         }
       }
     }
@@ -128,8 +129,8 @@ let foo_value = foo ?a
       "textEdit": {
         "newText": "~abb",
         "range": {
-          "end": { "character": 22, "line": 4 },
-          "start": { "character": 20, "line": 4 }
+          "start": { "line": 4, "character": 20 },
+          "end": { "line": 4, "character": 22 }
         }
       }
     }

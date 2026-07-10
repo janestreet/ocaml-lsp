@@ -1,0 +1,4 @@
+(library
+ (name ocaml_lsp_logging_impl)
+ (libraries async core ocaml_lsp_fiber lsp merlin-lib.utils stage)
+ (preprocess (pps ppx_sexp_conv ppx_let)))

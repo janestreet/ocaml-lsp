@@ -21,7 +21,7 @@ val jump : string
 (** Sends back a list of typed-hole locations.
     @param params [{ "uri":<uri> }] *)
 val on_request
-  :  log_info:Lsp_timing_logger.t
+  :  log_info:Log_info.t
   -> params:Jsonrpc.Structured.t option
   -> State.t
   -> Json.t Fiber.t
@@ -29,7 +29,7 @@ val on_request
 (** Sends back a range, allowing the client to jump to the next/previous typed hole.
     @param params [{ "uri":<uri>, "position":<position>, "direction":"prev"|"next" }] *)
 val on_jump_request
-  :  log_info:Lsp_timing_logger.t
+  :  log_info:Log_info.t
   -> params:Jsonrpc.Structured.t option
   -> State.t
   -> Json.t Fiber.t

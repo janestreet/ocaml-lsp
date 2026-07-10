@@ -65,7 +65,7 @@ let apply_inlay_hints
           ~range:(Range.create ~start:hint.position ~end_:hint.position)
           ~newText)
     in
-    Test.apply_edits source text_edits |> print_endline
+    TextEdit.For_testing.apply_edits source text_edits |> print_endline
   | None -> print_endline "No hints found"
 ;;
 

@@ -35,8 +35,8 @@ module Custom_commands = struct
       match arg_obj_fields with
       | [] -> [] (* no arguments -- the extension uses defaults *)
       | fields ->
-        (* the use of a (json) object as the first and single argument to the
-           command is intended *)
+        (* the use of a (json) object as the first and single argument to the command is
+           intended *)
         [ `Assoc fields ]
     in
     Command.create ~title:"Jump to Next Hole" ~command:"ocaml.next-hole" ~arguments ()

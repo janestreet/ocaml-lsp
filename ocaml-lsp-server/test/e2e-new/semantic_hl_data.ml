@@ -1,3 +1,5 @@
+(* NB: as of 06/06/25, this code triggers a bug in merlin's short path logic (figuring out
+   which name of a type to show to a user), which causes it to raise an exception. *)
 let src0 =
   {|
 module Moo : sig

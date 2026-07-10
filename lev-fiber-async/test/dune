@@ -1,0 +1,5 @@
+(library
+ (name lev_fiber_async_test)
+ (libraries async core csexp expect_test_helpers_core ocaml_lsp_fiber ocaml_lsp_fiber_shims lev_fiber_async core_unix.signal_unix ocaml_lsp_test_lib ocaml_lsp_thread_safe_ivar ocaml_lsp_stdune)
+ (inline_tests)
+ (preprocess (pps ppx_expect ppx_let ppx_jane)))

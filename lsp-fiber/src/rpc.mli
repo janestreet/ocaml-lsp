@@ -2,10 +2,19 @@
 
 open! Import
 
+module Notify : sig
+  (** An action to be run in a separate fiber after the notification is processed *)
+  type t = Jsonrpc_fiber.Notify.Work.t
+end
+
 module Reply : sig
   type 'resp t
 
+  (** A ready response to be sent to the other party *)
   val now : 'r -> 'r t
+
+  (** A computation which produces a response and sends it using the passed
+      ['r -> unit Fiber.t]. *)
   val later : (('r -> unit Fiber.t) -> unit Fiber.t) -> 'r t
 end
 
@@ -20,14 +29,24 @@ module type S = sig
     type 'a session := 'a t
 
     type 'state on_request =
-      { on_request : 'a. 'state session -> 'a in_request -> ('a Reply.t * 'state) Fiber.t
+      { on_request :
+          'a.
+          'state session
+          -> 'a in_request
+          -> request_time:Time_ns.t option
+          -> event_index:int option
+          -> ('a Reply.t * 'state) Fiber.t
       }
 
     type 'state t
 
     val make
       :  ?on_request:'state on_request
-      -> ?on_notification:('state session -> in_notification -> 'state Fiber.t)
+      -> ?on_notification:
+           ('state session
+            -> in_notification
+            -> event_index:int option
+            -> ('state * Notify.t option) Fiber.t)
       -> unit
       -> 'state t
   end

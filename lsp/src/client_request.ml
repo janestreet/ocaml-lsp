@@ -13,7 +13,7 @@ type _ t =
   | TextDocumentCompletion :
       CompletionParams.t
       -> [ `CompletionList of CompletionList.t | `List of CompletionItem.t list ] option t
-  | TextDocumentCodeLens : CodeLensParams.t -> CodeLens.t list t
+  | TextDocumentCodeLens : CodeLensParams.t -> CodeLens.t list option t
   | InlayHint : InlayHintParams.t -> InlayHint.t list option t
   | InlayHintResolve : InlayHint.t -> InlayHint.t t
   | TextDocumentDiagnostic : DocumentDiagnosticParams.t -> DocumentDiagnosticReport.t t
@@ -39,7 +39,7 @@ type _ t =
   | TextDocumentRangesFormatting :
       DocumentRangesFormattingParams.t
       -> TextEdit.t list option t
-  | TextDocumentRename : RenameParams.t -> WorkspaceEdit.t t
+  | TextDocumentRename : RenameParams.t -> WorkspaceEdit.t option t
   | TextDocumentLink : DocumentLinkParams.t -> DocumentLink.t list option t
   | TextDocumentLinkResolve : DocumentLink.t -> DocumentLink.t t
   | TextDocumentMoniker : MonikerParams.t -> Moniker.t list option t
@@ -59,7 +59,7 @@ type _ t =
   | TextDocumentReferences : ReferenceParams.t -> Location.t list option t
   | TextDocumentHighlight : DocumentHighlightParams.t -> DocumentHighlight.t list option t
   | TextDocumentFoldingRange : FoldingRangeParams.t -> FoldingRange.t list option t
-  | SignatureHelp : SignatureHelpParams.t -> SignatureHelp.t t
+  | SignatureHelp : SignatureHelpParams.t -> SignatureHelp.t option t
   | CodeAction : CodeActionParams.t -> CodeActionResult.t t
   | CodeActionResolve : CodeAction.t -> CodeAction.t t
   | CompletionItemResolve : CompletionItem.t -> CompletionItem.t t
@@ -74,7 +74,7 @@ type _ t =
       ColorPresentationParams.t
       -> ColorPresentation.t list t
   | TextDocumentColor : DocumentColorParams.t -> ColorInformation.t list t
-  | SelectionRange : SelectionRangeParams.t -> SelectionRange.t list t
+  | SelectionRange : SelectionRangeParams.t -> SelectionRange.t list option t
   | ExecuteCommand : ExecuteCommandParams.t -> Json.t t
   | SemanticTokensFull : SemanticTokensParams.t -> SemanticTokens.t option t
   | SemanticTokensDelta :
@@ -107,6 +107,37 @@ type _ t =
       ; params : Jsonrpc.Structured.t option
       }
       -> Json.t t
+
+module Custom_request_names = struct
+  let switch_impl_intf = "ocamllsp/switchImplIntf"
+  let infer_intf = "ocamllsp/inferIntf"
+  let typed_holes = "ocamllsp/typedHoles"
+  let typed_holes_jump = "ocamllsp/jumpToHole"
+  let merlin_call_compatible = "ocamllsp/merlinCallCompatible"
+  let type_enclosing = "ocamllsp/typeEnclosing"
+  let wrapping_ast_node = "ocamllsp/wrappingAstNode"
+  let semantic_tokens_debug = "ocamllsp/textDocument/semanticTokens/full"
+  let hover_extended = "ocamllsp/hoverExtended"
+  let complete_prefix_at_pos = "ocamllsp/completePrefixAtPos"
+end
+
+module Call_compatible_result = struct
+  type t =
+    { result_as_sexp : bool
+    ; result : string
+    }
+
+  let yojson_of_t { result_as_sexp; result } =
+    `Assoc [ "resultAsSexp", `Bool result_as_sexp; "result", `String result ]
+  ;;
+
+  let t_of_yojson json =
+    let open Yojson.Safe.Util in
+    let result_as_sexp = json |> member "resultAsSexp" |> to_bool in
+    let result = json |> member "result" |> to_string in
+    { result_as_sexp; result }
+  ;;
+end
 
 let yojson_of_DocumentSymbol ds : Json.t =
   Json.Option.yojson_of_t
@@ -154,7 +185,8 @@ let yojson_of_result (type a) (req : a t) (result : a) =
   | TextDocumentImplementation _, result ->
     Json.Option.yojson_of_t Locations.yojson_of_t result
   | TextDocumentCompletion _, result -> yojson_of_Completion result
-  | TextDocumentCodeLens _, result -> Json.To.list CodeLens.yojson_of_t result
+  | TextDocumentCodeLens _, result ->
+    Json.Option.yojson_of_t (Json.To.list CodeLens.yojson_of_t) result
   | TextDocumentCodeLensResolve _, result -> CodeLens.yojson_of_t result
   | TextDocumentPrepareCallHierarchy _, result ->
     Json.Option.yojson_of_t (Json.To.list CallHierarchyItem.yojson_of_t) result
@@ -166,7 +198,8 @@ let yojson_of_result (type a) (req : a t) (result : a) =
     Json.Option.yojson_of_t (Json.To.list TextEdit.yojson_of_t) result
   | TextDocumentRangesFormatting _, result ->
     Json.Option.yojson_of_t (Json.To.list TextEdit.yojson_of_t) result
-  | TextDocumentRename _, result -> WorkspaceEdit.yojson_of_t result
+  | TextDocumentRename _, result ->
+    Json.Option.yojson_of_t WorkspaceEdit.yojson_of_t result
   | DocumentSymbol _, result -> yojson_of_DocumentSymbol result
   | DebugEcho _, result -> DebugEcho.Result.yojson_of_t result
   | DebugTextDocumentGet _, result -> DebugTextDocumentGet.Result.yojson_of_t result
@@ -178,7 +211,7 @@ let yojson_of_result (type a) (req : a t) (result : a) =
     Json.Option.yojson_of_t (Json.To.list FoldingRange.yojson_of_t) result
   | TextDocumentMoniker _, result ->
     Json.Option.yojson_of_t (Json.To.list Moniker.yojson_of_t) result
-  | SignatureHelp _, result -> SignatureHelp.yojson_of_t result
+  | SignatureHelp _, result -> Json.Option.yojson_of_t SignatureHelp.yojson_of_t result
   | CodeAction _, result -> CodeActionResult.yojson_of_t result
   | CodeActionResolve _, result -> CodeAction.yojson_of_t result
   | CompletionItemResolve _, result -> CompletionItem.yojson_of_t result
@@ -196,7 +229,8 @@ let yojson_of_result (type a) (req : a t) (result : a) =
   | TextDocumentColorPresentation _, result ->
     Json.To.list ColorPresentation.yojson_of_t result
   | TextDocumentColor _, result -> Json.To.list ColorInformation.yojson_of_t result
-  | SelectionRange _, result -> Json.yojson_of_list SelectionRange.yojson_of_t result
+  | SelectionRange _, result ->
+    Json.Option.yojson_of_t (Json.yojson_of_list SelectionRange.yojson_of_t) result
   | SemanticTokensFull _, result ->
     Json.Option.yojson_of_t SemanticTokens.yojson_of_t result
   | SemanticTokensDelta _, result -> yojson_of_SemanticTokensDelta result
@@ -556,7 +590,7 @@ let response_of_json (type a) (t : a t) (json : Json.t) : a =
          ; (fun json -> `List (list_of_yojson CompletionItem.t_of_yojson json))
          ])
       json
-  | TextDocumentCodeLens _ -> list_of_yojson CodeLens.t_of_yojson json
+  | TextDocumentCodeLens _ -> option_of_yojson (list_of_yojson CodeLens.t_of_yojson) json
   | TextDocumentCodeLensResolve _ -> CodeLens.t_of_yojson json
   | TextDocumentPrepareCallHierarchy _ ->
     option_of_yojson (list_of_yojson CallHierarchyItem.t_of_yojson) json
@@ -565,7 +599,7 @@ let response_of_json (type a) (t : a t) (json : Json.t) : a =
     option_of_yojson (list_of_yojson TextEdit.t_of_yojson) json
   | TextDocumentRangesFormatting _ ->
     option_of_yojson (list_of_yojson TextEdit.t_of_yojson) json
-  | TextDocumentRename _ -> WorkspaceEdit.t_of_yojson json
+  | TextDocumentRename _ -> option_of_yojson WorkspaceEdit.t_of_yojson json
   | TextDocumentLink _ -> option_of_yojson (list_of_yojson DocumentLink.t_of_yojson) json
   | TextDocumentLinkResolve _ -> DocumentLink.t_of_yojson json
   | TextDocumentMoniker _ -> option_of_yojson (list_of_yojson Moniker.t_of_yojson) json
@@ -588,7 +622,7 @@ let response_of_json (type a) (t : a t) (json : Json.t) : a =
     option_of_yojson (list_of_yojson DocumentHighlight.t_of_yojson) json
   | TextDocumentFoldingRange _ ->
     option_of_yojson (list_of_yojson FoldingRange.t_of_yojson) json
-  | SignatureHelp _ -> SignatureHelp.t_of_yojson json
+  | SignatureHelp _ -> option_of_yojson SignatureHelp.t_of_yojson json
   | CodeAction _ -> CodeActionResult.t_of_yojson json
   | CodeActionResolve _ -> CodeAction.t_of_yojson json
   | CompletionItemResolve _ -> CompletionItem.t_of_yojson json
@@ -600,7 +634,7 @@ let response_of_json (type a) (t : a t) (json : Json.t) : a =
     option_of_yojson (list_of_yojson TextEdit.t_of_yojson) json
   | TextDocumentColorPresentation _ -> list_of_yojson ColorPresentation.t_of_yojson json
   | TextDocumentColor _ -> list_of_yojson ColorInformation.t_of_yojson json
-  | SelectionRange _ -> list_of_yojson SelectionRange.t_of_yojson json
+  | SelectionRange _ -> option_of_yojson (list_of_yojson SelectionRange.t_of_yojson) json
   | ExecuteCommand _ -> json
   | SemanticTokensFull _ -> option_of_yojson SemanticTokens.t_of_yojson json
   | SemanticTokensDelta _ ->
@@ -705,69 +739,76 @@ let text_document (type a) (t : a t) f : TextDocumentIdentifier.t option =
   | UnknownRequest { meth; params } -> f ~meth ~params
 ;;
 
-let all_uris (type a) (t : a t) ~fallback : Uri0.t list =
+let primary_uri (type a) (t : a t) ~fallback : Uri0.t option =
   match t with
-  | TextDocumentLinkResolve r -> r.target |> Option.to_list
-  | CodeActionResolve r ->
-    (match Option.bind r.edit (fun (e : WorkspaceEdit.t) -> e.changes) with
-     | None -> []
-     | Some changes -> List.map ~f:fst changes)
-  | WorkspaceSymbolResolve r -> [ r.location.uri ]
-  | WillCreateFiles r -> List.map r.files ~f:(fun { FileCreate.uri } -> Uri0.of_path uri)
-  | WillDeleteFiles r -> List.map r.files ~f:(fun { FileDelete.uri } -> Uri0.of_path uri)
-  | WillRenameFiles r ->
-    List.map r.files ~f:(fun { FileRename.newUri; _ } -> Uri0.of_path newUri)
-  | _ as req ->
-    text_document req fallback
-    |> Option.to_list
-    |> List.map ~f:(fun { TextDocumentIdentifier.uri } -> uri)
+  | WorkspaceSymbolResolve r -> Some r.location.uri
+  | _ ->
+    text_document t fallback |> Option.map (fun { TextDocumentIdentifier.uri } -> uri)
 ;;
 
-let positions (type a) (t : a t) ~fallback : Position.t list =
+let other_uris (type a) (t : a t) : Uri0.t list option =
+  match t with
+  | TextDocumentLinkResolve r -> Some (Option.to_list r.target)
+  | CodeActionResolve { edit; _ } ->
+    let%bind.Core.Option workspace_edit = edit in
+    let%bind.Core.Option workspace_changes = workspace_edit.changes in
+    Some (List.map ~f:fst workspace_changes)
+  | WillCreateFiles r ->
+    Some (List.map r.files ~f:(fun { FileCreate.uri } -> Uri0.of_path uri))
+  | WillDeleteFiles r ->
+    Some (List.map r.files ~f:(fun { FileDelete.uri } -> Uri0.of_path uri))
+  | WillRenameFiles r ->
+    Some
+      (List.map r.files ~f:(fun { FileRename.oldUri; _ } -> Uri0.of_path oldUri)
+       @ List.map r.files ~f:(fun { FileRename.newUri; _ } -> Uri0.of_path newUri))
+  | _ -> None
+;;
+
+let position (type a) (t : a t) ~fallback : Position.t option =
+  let open Core in
   match t with
   | CompletionItemResolve r ->
     (match r.textEdit with
-     | None -> []
-     | Some (`InsertReplaceEdit { insert; _ }) -> [ insert.end_ ]
-     | Some (`TextEdit { range; _ }) -> [ range.end_ ])
-  | TextDocumentLinkResolve r -> [ r.range.end_ ]
-  | TextDocumentCodeLensResolve r -> [ r.range.end_ ]
-  | TextDocumentHover r -> [ r.position ]
-  | TextDocumentDefinition r -> [ r.position ]
-  | TextDocumentDeclaration r -> [ r.position ]
-  | TextDocumentTypeDefinition r -> [ r.position ]
-  | TextDocumentImplementation r -> [ r.position ]
-  | TextDocumentCompletion r -> [ r.position ]
-  | TextDocumentPrepareCallHierarchy r -> [ r.position ]
-  | TextDocumentPrepareTypeHierarchy r -> [ r.position ]
-  | TextDocumentPrepareRename r -> [ r.position ]
-  | TextDocumentRangeFormatting r -> [ r.range.end_ ]
+     | None -> None
+     | Some (`InsertReplaceEdit { insert; _ }) -> Some insert.end_
+     | Some (`TextEdit { range; _ }) -> Some range.end_)
+  | TextDocumentLinkResolve r -> Some r.range.end_
+  | TextDocumentCodeLensResolve r -> Some r.range.end_
+  | TextDocumentHover r -> Some r.position
+  | TextDocumentDefinition r -> Some r.position
+  | TextDocumentDeclaration r -> Some r.position
+  | TextDocumentTypeDefinition r -> Some r.position
+  | TextDocumentImplementation r -> Some r.position
+  | TextDocumentCompletion r -> Some r.position
+  | TextDocumentPrepareCallHierarchy r -> Some r.position
+  | TextDocumentPrepareTypeHierarchy r -> Some r.position
+  | TextDocumentPrepareRename r -> Some r.position
+  | TextDocumentRangeFormatting r -> Some r.range.end_
   | TextDocumentRangesFormatting r ->
-    List.map r.ranges ~f:(fun (range : Range.t) -> range.end_)
-  | TextDocumentRename r -> [ r.position ]
-  | DebugTextDocumentGet r -> [ r.position ]
-  | TextDocumentReferences r -> [ r.position ]
-  | TextDocumentHighlight r -> [ r.position ]
-  | TextDocumentMoniker r -> [ r.position ]
-  | SignatureHelp r -> [ r.position ]
-  | CodeAction r -> [ r.range.end_ ]
-  | CodeActionResolve r ->
-    (match Option.bind r.edit (fun (e : WorkspaceEdit.t) -> e.changes) with
-     | None -> []
-     | Some changes ->
-       List.map ~f:snd changes
-       |> List.concat
-       |> List.map ~f:(fun (e : TextEdit.t) -> e.range.end_))
-  | TextDocumentOnTypeFormatting r -> [ r.position ]
-  | TextDocumentColorPresentation r -> [ r.range.end_ ]
-  | SelectionRange r -> r.positions
-  | SemanticTokensRange r -> [ r.range.end_ ]
-  | LinkedEditingRange r -> [ r.position ]
-  | InlayHint r -> [ r.range.end_ ]
-  | TextDocumentInlineCompletion r -> [ r.position ]
-  | TextDocumentInlineValue r -> [ r.range.end_ ]
-  | WorkspaceSymbolResolve r -> [ r.location.range.end_ ]
-  | InlayHintResolve r -> [ r.position ]
+    List.hd r.ranges |> Option.map ~f:(fun { Range.end_; _ } -> end_)
+  | TextDocumentRename r -> Some r.position
+  | DebugTextDocumentGet r -> Some r.position
+  | TextDocumentReferences r -> Some r.position
+  | TextDocumentHighlight r -> Some r.position
+  | TextDocumentMoniker r -> Some r.position
+  | SignatureHelp r -> Some r.position
+  | CodeAction r -> Some r.range.end_
+  | CodeActionResolve { edit; _ } ->
+    let%bind.Option workspace_edit = edit in
+    let%bind.Option workspace_changes = workspace_edit.changes in
+    let%bind.Option _, file_edits = List.hd workspace_changes in
+    let%bind.Option first_edit = List.hd file_edits in
+    Some first_edit.range.end_
+  | TextDocumentOnTypeFormatting r -> Some r.position
+  | TextDocumentColorPresentation r -> Some r.range.end_
+  | SelectionRange r -> List.hd r.positions
+  | SemanticTokensRange r -> Some r.range.end_
+  | LinkedEditingRange r -> Some r.position
+  | InlayHint r -> Some r.range.end_
+  | TextDocumentInlineCompletion r -> Some r.position
+  | TextDocumentInlineValue r -> Some r.range.end_
+  | WorkspaceSymbolResolve r -> Some r.location.range.end_
+  | InlayHintResolve r -> Some r.position
   | ExecuteCommand _
   | WorkspaceSymbol _
   | DebugEcho _
@@ -790,6 +831,6 @@ let positions (type a) (t : a t) ~fallback : Position.t list =
   | CallHierarchyOutgoingCalls _
   | WillCreateFiles _
   | WillDeleteFiles _
-  | WillRenameFiles _ -> []
+  | WillRenameFiles _ -> None
   | UnknownRequest { meth; params } -> fallback ~meth ~params
 ;;

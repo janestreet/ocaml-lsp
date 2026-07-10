@@ -1,15 +1,9 @@
 open Import
 
+let priority = Priorities.type_enclosing
 let capability = "handleTypeEnclosing", `Bool true
-let meth = "ocamllsp/typeEnclosing"
-
-let get_doc_id ~(params : Jsonrpc.Structured.t option) =
-  match params with
-  | Some (`Assoc params) ->
-    List.assoc_opt "textDocument" params
-    |> Option.map ~f:TextDocumentIdentifier.t_of_yojson
-  | _ -> None
-;;
+let meth = Lsp.Client_request.Custom_request_names.type_enclosing
+let get_doc_id = Util.get_doc_id
 
 module Request_params = struct
   type t =
@@ -106,6 +100,7 @@ let with_pipeline ~log_info state uri verbosity with_pipeline =
     Document.Merlin.with_configurable_pipeline_exn
       ~config:(config_with_given_verbosity config verbosity)
       ~log_info
+      ~priority
       merlin
       with_pipeline
 ;;
@@ -117,7 +112,7 @@ let make_enclosing_command position index =
 let get_first_enclosing_index range_end enclosings =
   List.find_mapi enclosings ~f:(fun i (loc, _, _) ->
     let range = Range.of_loc loc in
-    match Position.compare range_end range.end_ with
+    match Ordering.of_int (Position.compare range_end range.end_) with
     | Ordering.Lt | Ordering.Eq -> Some i
     | Ordering.Gt -> None)
 ;;
@@ -138,19 +133,18 @@ let dispatch_command pipeline command first_index index =
 ;;
 
 let dispatch_with_range_end pipeline position index range_end =
-  (* merlin's `type-enclosing` command takes a position and returns a list of
-     increasing enclosures around that position. If it is given the [index]
-     parameter, it annotates the corresponding enclosing with its type.
+  (* merlin's `type-enclosing` command takes a position and returns a list of increasing
+     enclosures around that position. If it is given the [index] parameter, it annotates
+     the corresponding enclosing with its type.
 
-     As the request would like to allow the target of an interval, we want to
-     truncate the list of enclosures that include the interval. Something merlin
-     cannot do.
+     As the request would like to allow the target of an interval, we want to truncate the
+     list of enclosures that include the interval. Something merlin cannot do.
 
-     We use a little hack where we use the `type-enclosing` command (with a
-     negative index, so as not to make unnecessary computations) to calculate
-     the enclosings around the given position. Then, we look for the index
-     corresponding to the first enclosing included in the range which will act
-     as an offset to calculate the real index, relative to the range *)
+     We use a little hack where we use the `type-enclosing` command (with a negative
+     index, so as not to make unnecessary computations) to calculate the enclosings around
+     the given position. Then, we look for the index corresponding to the first enclosing
+     included in the range which will act as an offset to calculate the real index,
+     relative to the range *)
   let dummy_command = make_enclosing_command position (-1) in
   let enclosings = Query_commands.dispatch pipeline dummy_command in
   Option.bind (get_first_enclosing_index range_end enclosings) ~f:(fun first_index ->

@@ -4,6 +4,8 @@ module String = Merlin_utils.Std.String
 module Misc_utils = Merlin_analysis.Misc_utils
 module Type_utils = Merlin_analysis.Type_utils
 
+let priority = Priorities.signature_help
+
 open struct
   open Ocaml_typing
   module Predef = Predef
@@ -31,21 +33,21 @@ let extract_ident (exp_desc : Typedtree.expression_desc) =
   let rec longident ppf : Longident.t -> unit = function
     | Lident s -> Format.fprintf ppf "%s" (Misc_utils.parenthesize_name s)
     | Ldot (p, s) ->
-      Format.fprintf ppf "%a.%s" longident p (Misc_utils.parenthesize_name s)
-    | Lapply (p1, p2) -> Format.fprintf ppf "%a(%a)" longident p1 longident p2
+      Format.fprintf ppf "%a.%s" longident p.txt (Misc_utils.parenthesize_name s.txt)
+    | Lapply (p1, p2) -> Format.fprintf ppf "%a(%a)" longident p1.txt longident p2.txt
   in
   match exp_desc with
-  | Texp_ident (_, { txt = li; _ }, _, _, _, _) ->
+  | Texp_ident { lid = { txt = li; _ }; _ } ->
     let ppf, to_string = Format.to_string () in
     longident ppf li;
     Some (to_string ())
   | _ -> None
 ;;
 
-(* Type variables shared across arguments should all be printed with the same
-   name. [Printtyp.type_scheme] ensure that a name is unique within a given
-   type, but not across different invocations. [reset] followed by calls to
-   [mark_loops] and [type_sch] provide that *)
+(* Type variables shared across arguments should all be printed with the same name.
+   [Printtyp.type_scheme] ensure that a name is unique within a given type, but not across
+   different invocations. [reset] followed by calls to [mark_loops] and [type_sch] provide
+   that *)
 let pp_type env ppf ty =
   let module Printtyp = Type_utils.Printtyp in
   Printtyp.wrap_printing_env env ~verbosity:(Lvl 0) (fun () ->
@@ -75,8 +77,9 @@ let pp_parameter env label ppf ty =
   | Optional l ->
     (* unwrap option for optional labels the same way as
        [Raw_compat.labels_of_application] *)
-    let unwrap_option ty =
+    let rec unwrap_option ty =
       match Types.get_desc ty with
+      | Types.Tpoly (ty, []) -> unwrap_option ty
       | Types.Tconstr (path, [ ty ], _) when Path.same path Predef.path_option -> ty
       | _ -> ty
     in
@@ -95,7 +98,6 @@ let print_parameter_offset ?arg:argument ppf buffer env label ty =
 ;;
 
 let separate_function_signature ~args (e : Typedtree.expression) =
-  Type_utils.Printtyp.reset ();
   let buffer = Buffer.create 16 in
   let ppf = Format.formatter_of_buffer buffer in
   let rec separate ?(i = 0) ?(parameters = []) args ty =
@@ -173,8 +175,7 @@ let application_signature ~prefix = function
       | None -> active_parameter_by_prefix ~prefix result.parameters
     in
     Some { result with active_param }
-  (* provide signature information directly after an unapplied function-type
-     value *)
+  (* provide signature information directly after an unapplied function-type value *)
   | (_, Expression ({ exp_type; _ } as e)) :: _ when is_arrow exp_type ->
     let result = separate_function_signature e ~args:[] in
     let active_param = active_parameter_by_prefix ~prefix result.parameters in
@@ -207,25 +208,25 @@ let run
   in
   let pos = Position.logical position in
   let prefix =
-    (* The value of [short_path] doesn't make a difference to the final result
-       because labels cannot include dots. However, a true value is slightly
-       faster for getting the prefix. *)
-    Compl.prefix_of_position (Document.source doc) pos ~short_path:true
+    (* The value of [short_path] doesn't make a difference to the final result because
+       labels cannot include dots. However, a true value is slightly faster for getting
+       the prefix. *)
+    Compl.prefix_of_position (Document.source doc) pos ~short_path:`Suffix
   in
   (* TODO use merlin resources efficiently and do everything in 1 thread *)
   match Document.kind doc with
   | `Other ->
-    let help = SignatureHelp.create ~signatures:[] () in
+    let help = Some (SignatureHelp.create ~signatures:[] ()) in
     Fiber.return help
   | `Merlin merlin ->
     let* application_signature =
       let* inside_comment =
-        Check_for_comments.position_in_comment ~log_info ~position ~merlin
+        Check_for_comments.position_in_comment ~log_info ~position ~merlin ~priority
       in
       match inside_comment with
       | true -> Fiber.return None
       | false ->
-        Document.Merlin.with_pipeline_exn ~log_info merlin (fun pipeline ->
+        Document.Merlin.with_pipeline_exn ~log_info ~priority merlin (fun pipeline ->
           let typer = Mpipeline.typer_result pipeline in
           let pos = Mpipeline.get_lexing_pos pipeline pos in
           let node = Mtyper.node_at typer pos in
@@ -233,7 +234,7 @@ let run
     in
     (match application_signature with
      | None ->
-       let help = SignatureHelp.create ~signatures:[] () in
+       let help = Some (SignatureHelp.create ~signatures:[] ()) in
        Fiber.return help
      | Some application_signature ->
        let prefix =
@@ -244,6 +245,7 @@ let run
        let+ doc =
          Document.Merlin.doc_comment
            ~log_info
+           ~priority:Priorities.signature_help
            merlin
            application_signature.function_position
        in
@@ -269,9 +271,10 @@ let run
          let label = prefix ^ application_signature.signature in
          SignatureInformation.create ~label ?documentation ~parameters ()
        in
-       SignatureHelp.create
-         ~signatures:[ info ]
-         ~activeSignature:0
-         ?activeParameter:(Some application_signature.active_param)
-         ())
+       Some
+         (SignatureHelp.create
+            ~signatures:[ info ]
+            ~activeSignature:0
+            ?activeParameter:(Some application_signature.active_param)
+            ()))
 ;;

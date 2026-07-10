@@ -16,7 +16,7 @@ let code_action_of_intf doc intf range =
     in
     WorkspaceEdit.create ~documentChanges:[ `TextDocumentEdit edit ] ()
   in
-  let title = String.capitalize_ascii "Insert inferred interface" in
+  let title = String.capitalize "Insert inferred interface" in
   CodeAction.create
     ~title
     ~kind:(CodeActionKind.Other action_kind)

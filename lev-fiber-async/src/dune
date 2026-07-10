@@ -1,18 +1,4 @@
 (library
-  (name lev_fiber_async)
-  (libraries
-    async
-    async_kernel
-    async_unix
-    base
-    core
-    core_unix
-    core_unix.signal_unix
-    csexp
-    fiber
-    fiber_async
-    ppx_expect
-    stdune
-    unix)
-  (preprocess
-    (pps ppx_jane)))
+ (name lev_fiber_async)
+ (libraries async core core_unix csexp ocaml_lsp_fiber ocaml_lsp_fiber_shims core_unix.signal_unix unix ocaml_lsp_stdune ocaml_lsp_misc_shims)
+ (preprocess (pps ppx_expect ppx_let ppx_sexp_message)))

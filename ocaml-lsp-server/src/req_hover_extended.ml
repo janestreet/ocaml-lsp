@@ -2,22 +2,9 @@ open Import
 open Fiber.O
 
 let capability = "handleHoverExtended", `Bool true
-let meth = "ocamllsp/hoverExtended"
-
-let get_doc_id ~(params : Jsonrpc.Structured.t option) =
-  match params with
-  | Some (`Assoc params) ->
-    List.assoc_opt "textDocument" params
-    |> Option.map ~f:TextDocumentIdentifier.t_of_yojson
-  | _ -> None
-;;
-
-let get_pos ~(params : Jsonrpc.Structured.t option) =
-  match params with
-  | Some (`Assoc params) ->
-    List.assoc_opt "position" params |> Option.map ~f:Position.t_of_yojson
-  | _ -> None
-;;
+let meth = Lsp.Client_request.Custom_request_names.hover_extended
+let get_doc_id = Util.get_doc_id
+let get_pos = Util.get_pos
 
 module Request_params = struct
   open Json.Conv

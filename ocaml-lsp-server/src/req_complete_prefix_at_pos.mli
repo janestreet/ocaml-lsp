@@ -1,0 +1,18 @@
+open Import
+
+(** This module handles `textDocument/completePrefixAtPos` LSP requests. *)
+
+val capability : string * Json.t
+val meth : string
+val get_doc_id : params:Jsonrpc.Structured.t option -> TextDocumentIdentifier.t option
+val get_pos : params:Jsonrpc.Structured.t option -> Position.t option
+
+val on_request
+  :  log_info:Log_info.t
+  -> params:Jsonrpc.Structured.t option
+  -> State.t
+  -> Json.t Fiber.t
+
+module For_testing : sig
+  val serialize : CompletionItem.t list * (string * string) list option -> Json.t
+end

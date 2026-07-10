@@ -1,7 +1,6 @@
 (* This module is based on the [vscode-uri] implementation:
-   https://github.com/microsoft/vscode-uri/blob/main/src/uri.ts. It only
-   supports scheme, authority and path. Query, port and fragment are not
-   implemented *)
+   https://github.com/microsoft/vscode-uri/blob/main/src/uri.ts. It only supports scheme,
+   authority and path. Query, port and fragment are not implemented *)
 
 open Import
 
@@ -9,12 +8,17 @@ module Private = struct
   let win32 = ref Sys.win32
 end
 
-type t = Uri_lexer.t =
-  { scheme : string
-  ; authority : string
-  ; path : string
-  ; query : string option
-  }
+include struct
+  open Core (* needed for bin_shape_string and friends to derive bin_io *)
+
+  type t = Uri_lexer.t =
+    { scheme : string
+    ; authority : string
+    ; path : string
+    ; query : string option
+    }
+  [@@deriving bin_io, sexp_of]
+end
 
 let query t = t.query
 
@@ -68,6 +72,8 @@ let to_path { path; authority; scheme; query } =
   if !Private.win32 then slash_to_backslash path else path
 ;;
 
+let same_path ~path t = String.equal t.path path
+let drop_query t = { t with query = None }
 let of_string = Uri_lexer.of_string
 
 let safe_chars =
@@ -111,8 +117,8 @@ let to_string { scheme; authority; path; query } =
     Buffer.add_string buff scheme;
     Buffer.add_char buff ':');
   if (not (String.is_empty authority)) || scheme = "file" then Buffer.add_string buff "//";
-  (*TODO: implement full logic:
-    https://github.com/microsoft/vscode-uri/blob/96acdc0be5f9d5f2640e1c1f6733bbf51ec95177/src/uri.ts#L605 *)
+  (* TODO: implement full logic:
+     https://github.com/microsoft/vscode-uri/blob/96acdc0be5f9d5f2640e1c1f6733bbf51ec95177/src/uri.ts#L605 *)
   if not (String.is_empty authority)
   then (
     let s = String.lowercase_ascii authority in
@@ -155,3 +161,16 @@ let t_of_yojson json = Json.Conv.string_of_yojson json |> of_string
 let equal = ( = )
 let compare (x : t) (y : t) = Stdlib.compare x y
 let hash = Hashtbl.hash
+
+let split_on_share ~offset uri =
+  let open Core in
+  let abs_path = drop_query uri |> to_path |> File_path.Absolute.of_string in
+  let share = File_path.Part.of_string "+share+" in
+  let parts = File_path.Absolute.to_parts abs_path in
+  let%map.Option index, _ =
+    List.findi parts ~f:(fun _ part -> File_path.Part.equal share part)
+  in
+  Ocaml_lsp_misc_shims.split_n_boxed parts (index + offset)
+;;
+
+let split_on_share uri = split_on_share ~offset:0 uri

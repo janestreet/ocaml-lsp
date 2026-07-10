@@ -1,0 +1,4 @@
+(library
+ (name ocaml_lsp_stdune)
+ (preprocess (pps ppx_jane))
+ (libraries core file_path core_unix.sys_unix))

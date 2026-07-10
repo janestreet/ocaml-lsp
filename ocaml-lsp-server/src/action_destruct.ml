@@ -3,6 +3,7 @@ open Fiber.O
 
 let action_kind = "destruct (enumerate cases)"
 let kind = CodeActionKind.Other action_kind
+let priority = Priorities.code_action
 
 let code_action_of_case_analysis ~supportsJumpToNextHole doc uri (loc, newText) =
   let range : Range.t = Range.of_loc loc in
@@ -13,7 +14,7 @@ let code_action_of_case_analysis ~supportsJumpToNextHole doc uri (loc, newText) 
     let edit = TextDocumentEdit.create ~textDocument ~edits:[ `TextEdit textedit ] in
     WorkspaceEdit.create ~documentChanges:[ `TextDocumentEdit edit ] ()
   in
-  let title = String.capitalize_ascii action_kind in
+  let title = String.capitalize action_kind in
   let command =
     if supportsJumpToNextHole
     then
@@ -44,7 +45,7 @@ let code_action ~log_info (state : State.t) doc (params : CodeActionParams.t) =
       let finish = Position.logical params.range.end_ in
       Query_protocol.Case_analysis (start, finish)
     in
-    let* res = Document.Merlin.dispatch ~log_info merlin command in
+    let* res = Document.Merlin.dispatch ~log_info ~priority merlin command in
     (match res with
      | Ok (loc, newText) ->
        let+ newText =

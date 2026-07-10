@@ -13,7 +13,7 @@ type _ t =
   | TextDocumentCompletion :
       CompletionParams.t
       -> [ `CompletionList of CompletionList.t | `List of CompletionItem.t list ] option t
-  | TextDocumentCodeLens : CodeLensParams.t -> CodeLens.t list t
+  | TextDocumentCodeLens : CodeLensParams.t -> CodeLens.t list option t
   | InlayHint : InlayHintParams.t -> InlayHint.t list option t
   | InlayHintResolve : InlayHint.t -> InlayHint.t t
   | TextDocumentDiagnostic : DocumentDiagnosticParams.t -> DocumentDiagnosticReport.t t
@@ -39,7 +39,7 @@ type _ t =
   | TextDocumentRangesFormatting :
       DocumentRangesFormattingParams.t
       -> TextEdit.t list option t
-  | TextDocumentRename : RenameParams.t -> WorkspaceEdit.t t
+  | TextDocumentRename : RenameParams.t -> WorkspaceEdit.t option t
   | TextDocumentLink : DocumentLinkParams.t -> DocumentLink.t list option t
   | TextDocumentLinkResolve : DocumentLink.t -> DocumentLink.t t
   | TextDocumentMoniker : MonikerParams.t -> Moniker.t list option t
@@ -59,7 +59,7 @@ type _ t =
   | TextDocumentReferences : ReferenceParams.t -> Location.t list option t
   | TextDocumentHighlight : DocumentHighlightParams.t -> DocumentHighlight.t list option t
   | TextDocumentFoldingRange : FoldingRangeParams.t -> FoldingRange.t list option t
-  | SignatureHelp : SignatureHelpParams.t -> SignatureHelp.t t
+  | SignatureHelp : SignatureHelpParams.t -> SignatureHelp.t option t
   | CodeAction : CodeActionParams.t -> CodeActionResult.t t
   | CodeActionResolve : CodeAction.t -> CodeAction.t t
   | CompletionItemResolve : CompletionItem.t -> CompletionItem.t t
@@ -74,7 +74,7 @@ type _ t =
       ColorPresentationParams.t
       -> ColorPresentation.t list t
   | TextDocumentColor : DocumentColorParams.t -> ColorInformation.t list t
-  | SelectionRange : SelectionRangeParams.t -> SelectionRange.t list t
+  | SelectionRange : SelectionRangeParams.t -> SelectionRange.t list option t
   | ExecuteCommand : ExecuteCommandParams.t -> Json.t t
   | SemanticTokensFull : SemanticTokensParams.t -> SemanticTokens.t option t
   | SemanticTokensDelta :
@@ -108,6 +108,29 @@ type _ t =
       }
       -> Json.t t
 
+module Custom_request_names : sig
+  val switch_impl_intf : string
+  val infer_intf : string
+  val typed_holes : string
+  val typed_holes_jump : string
+  val merlin_call_compatible : string
+  val type_enclosing : string
+  val wrapping_ast_node : string
+  val semantic_tokens_debug : string
+  val hover_extended : string
+  val complete_prefix_at_pos : string
+end
+
+module Call_compatible_result : sig
+  type t =
+    { result_as_sexp : bool
+    ; result : string
+    }
+
+  val yojson_of_t : t -> Yojson.Safe.t
+  val t_of_yojson : Yojson.Safe.t -> t
+end
+
 val yojson_of_result : 'a t -> 'a -> Json.t
 
 type packed = E : 'r t -> packed
@@ -123,18 +146,20 @@ val text_document
       -> TextDocumentIdentifier.t option)
   -> TextDocumentIdentifier.t option
 
-val all_uris
+val primary_uri
   :  _ t
   -> fallback:
        (meth:string
         -> params:Jsonrpc.Structured.t option
         -> Types.TextDocumentIdentifier.t option)
-  -> Uri0.t list
+  -> Uri0.t option
 
-val positions
+val other_uris : _ t -> Uri0.t list option
+
+val position
   :  _ t
-  -> fallback:(meth:string -> params:Jsonrpc.Structured.t option -> Position.t list)
-  -> Position.t list
+  -> fallback:(meth:string -> params:Jsonrpc.Structured.t option -> Position.t option)
+  -> Position.t option
 
 (** This is a to_string function. It's exposed for use in logging. *)
 val method_ : 'a t -> string

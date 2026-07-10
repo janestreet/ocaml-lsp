@@ -1,36 +1,9 @@
+module Fiber = Ocaml_lsp_fiber
+
 module Import = struct
   include struct
-    include Stdune
-
-    module List = struct
-      include List
-
-      let find_mapi ~f l =
-        let rec k i = function
-          | [] -> None
-          | x :: xs ->
-            (match f i x with
-             | Some x' -> Some x'
-             | None -> (k [@tailcall]) (i + 1) xs)
-        in
-        k 0 l
-      ;;
-
-      let take n l =
-        let rec take acc n l =
-          if n = 0
-          then acc
-          else (
-            match l with
-            | [] -> failwith "list shorter than n"
-            | x :: xs -> (take [@tailcall]) (x :: acc) (n - 1) xs)
-        in
-        List.rev (take [] n l)
-      ;;
-    end
-
     module Array = struct
-      include Array
+      include Core.Array
 
       module Iter : sig
         type 'a t
@@ -46,7 +19,7 @@ module Import = struct
           }
 
         let create contents = { contents; ix = 0 }
-        let has_next t = t.ix < Array.length t.contents
+        let has_next t = t.ix < Core.Array.length t.contents
 
         let next_exn t =
           let { contents; ix } = t in
@@ -65,43 +38,47 @@ module Import = struct
   include Lsp.Types
   module Uri = Lsp.Uri
   module Position = Ocaml_lsp_server.Position
+  module Option = Core.Option
+  module List = Core.List
+  module String = Core.String
 end
 
 open Import
+module Fiber_async = Ocaml_lsp_fiber_shims.Fiber_async
 
 module T : sig
   val run_with_status
     :  ?extra_env:string list
+    -> ?cwd:string
     -> ?handler:unit Client.Handler.t
+    -> ?timeout_s:float
     -> (unit Client.t -> 'a Fiber.t)
     -> (Unix.process_status * 'a) Async.Deferred.t
 
   val run
     :  ?extra_env:string list
+    -> ?cwd:string
     -> ?handler:unit Client.Handler.t
+    -> ?timeout_s:float
     -> (unit Client.t -> 'a Fiber.t)
     -> 'a Async.Deferred.t
 end = struct
-  let _PATH = Bin.parse_path (Option.value ~default:"" @@ Env.get Env.initial "PATH")
-  let bin = Bin.which "ocamllsp" ~path:_PATH |> Option.value_exn |> Path.to_string
+  let bin = Ocaml_lsp_test_lib.get_test_ocaml_lsp_bin ()
 
-  let add_testing_framework env =
-    (* [am_running_test] checks for the presence of the TESTING_FRAMEWORK environment
-       variable. When building with external dune, we have to add it manually. *)
-    if Array.exists env ~f:(fun v -> String.starts_with v ~prefix:"TESTING_FRAMEWORK")
-    then env
-    else Array.append env [| "TESTING_FRAMEWORK=unknown" |]
-  ;;
-
-  let run_with_status ?(extra_env = []) ?handler f =
+  let run_with_status ?(extra_env = []) ?cwd ?handler ?(timeout_s = 3.) f =
     let stdin_i, stdin_o = Unix.pipe ~cloexec:true () in
     let stdout_i, stdout_o = Unix.pipe ~cloexec:true () in
     let pid =
       let env =
-        let current = Unix.environment () |> add_testing_framework in
+        let current = Unix.environment () in
         Array.to_list current @ extra_env |> Spawn.Env.of_list
       in
-      Spawn.spawn ~env ~prog:bin ~argv:[ bin ] ~stdin:stdin_i ~stdout:stdout_o ()
+      let cwd =
+        match cwd with
+        | None -> Spawn.Working_dir.Inherit
+        | Some path -> Spawn.Working_dir.Path path
+      in
+      Spawn.spawn ~env ~cwd ~prog:bin ~argv:[ bin ] ~stdin:stdin_i ~stdout:stdout_o ()
     in
     Unix.close stdin_i;
     Unix.close stdout_o;
@@ -152,7 +129,7 @@ end = struct
     in
     let fiber =
       Fiber.of_thunk (fun () ->
-        let* wheel = Lev_fiber.Timer.Wheel.create ~delay:3.0 in
+        let* wheel = Lev_fiber.Timer.Wheel.create ~delay:timeout_s in
         let+ res = init
         and+ status =
           Fiber.fork_and_join_unit
@@ -164,8 +141,8 @@ end = struct
     Fiber_async.deferred_of_fiber fiber ()
   ;;
 
-  let run ?extra_env ?handler f =
-    Async.Deferred.map (run_with_status ?extra_env ?handler f) ~f:snd
+  let run ?extra_env ?cwd ?handler ?timeout_s f =
+    Async.Deferred.map (run_with_status ?extra_env ?cwd ?handler ?timeout_s f) ~f:snd
   ;;
 end
 
@@ -173,13 +150,17 @@ include T
 
 let drain_diagnostics () =
   let diagnostics = Fiber.Ivar.create () in
-  let on_notification _ = function
+  let on_notification _ n ~event_index:_ =
+    match n with
     | Lsp.Server_notification.PublishDiagnostics _ ->
       let* diag = Fiber.Ivar.peek diagnostics in
-      (match diag with
-       | Some _ -> Fiber.return ()
-       | None -> Fiber.Ivar.fill diagnostics ())
-    | _ -> Fiber.return ()
+      let+ r =
+        match diag with
+        | Some _ -> Fiber.return ()
+        | None -> Fiber.Ivar.fill diagnostics ()
+      in
+      r, None
+    | _ -> Fiber.return ((), None)
   in
   on_notification, diagnostics
 ;;
@@ -225,42 +206,13 @@ let openDocument ~client ~uri ~source =
     (TextDocumentDidOpen (DidOpenTextDocumentParams.create ~textDocument))
 ;;
 
-let offset_of_position src (pos : Position.t) =
-  let line_offset =
-    String.split_lines src
-    |> List.take pos.line
-    |> List.fold_left ~init:0 ~f:(fun s l -> s + String.length l)
+let humanDidOpen ~client ~uri ~source =
+  let textDocument =
+    TextDocumentItem.create ~uri ~languageId:"ocaml" ~version:0 ~text:source
   in
-  line_offset + pos.line (* account for line endings *) + pos.character
-;;
-
-let apply_edits src edits =
-  let edits =
-    List.sort edits ~compare:(fun (e : TextEdit.t) (e' : TextEdit.t) ->
-      Position.compare e.range.start e'.range.start)
-  in
-  (* check that edits are non-overlapping *)
-  let rec overlaps : TextEdit.t list -> _ = function
-    | [] | [ _ ] -> false
-    | e :: e' :: es ->
-      (match Position.compare e.range.end_ e'.range.start with
-       | Gt -> true
-       | Lt | Eq -> overlaps (e' :: es))
-  in
-  if overlaps edits then failwith "overlapping edits";
-  let _, edits =
-    (* compute start and end character offsets for each edit *)
-    List.map edits ~f:(fun (e : TextEdit.t) ->
-      e.newText, offset_of_position src e.range.start, offset_of_position src e.range.end_)
-    (* update the offsets to account for preceding edits *)
-    |> List.fold_left_map ~init:0 ~f:(fun offset (new_text, start, end_) ->
-      if end_ < start then failwith "invalid edit: end before start";
-      ( offset + (String.length new_text - (end_ - start))
-      , (new_text, start + offset, end_ + offset) ))
-  in
-  (* apply edits *)
-  List.fold_left edits ~init:src ~f:(fun src (new_text, start, end_) ->
-    String.take src start ^ new_text ^ String.drop src end_)
+  Client.notification
+    client
+    (CustomNotification (HumanDidOpen (DidHumanOpenParams.create ~textDocument)))
 ;;
 
 let print_result result =

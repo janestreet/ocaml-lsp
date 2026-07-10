@@ -1,7 +1,13 @@
+open Import
+
 module Notify : sig
+  module Work : sig
+    type t = unit -> unit Fiber.t
+  end
+
   type t =
     | Stop
-    | Continue
+    | Continue of Work.t option
 end
 
 module Reply : sig

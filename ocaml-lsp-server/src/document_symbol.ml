@@ -1,6 +1,8 @@
 open Import
 open Fiber.O
 
+let priority = Priorities.document_symbol
+
 let core_type_to_string typ =
   ignore (Format.flush_str_formatter ());
   Pprintast.core_type Format.str_formatter typ;
@@ -70,12 +72,12 @@ let type_ext_document_symbol (ext : Parsetree.type_extension) : DocumentSymbol.t
       ~init:(Range.of_loc ext.ptyext_path.loc)
       ~f:(fun (range : Range.t) (child : DocumentSymbol.t) ->
         let start =
-          match Position.compare range.start child.range.start with
+          match Ordering.of_int (Position.compare range.start child.range.start) with
           | Lt | Eq -> range.start
           | Gt -> child.range.start
         in
         let end_ =
-          match Position.compare range.end_ child.range.end_ with
+          match Ordering.of_int (Position.compare range.end_ child.range.end_) with
           | Lt | Eq -> child.range.end_
           | Gt -> range.end_
         in
@@ -181,15 +183,7 @@ let binding_document_symbol
       | Some _, _ -> Property
       | _ -> Variable
     in
-    let detail =
-      None
-      (* TODO: Re-enable in 5.0: {[
-           Option.map binding.pvb_constraint ~f:(function
-               | Pvc_constraint { typ; _ } -> core_type_to_string typ
-               | Pvc_coercion { coercion; _ } -> core_type_to_string coercion)
-         ]}
-      *)
-    in
+    let detail = None in
     [ DocumentSymbol.create
         ~name
         ~kind
@@ -202,7 +196,10 @@ let binding_document_symbol
   | `Variables symbols -> symbols @ children
 ;;
 
-let symbols_from_parsetree parsetree =
+let symbols_from_parsetree
+  ~(document_symbol_configuration : Config_data.DocumentSymbol.t)
+  parsetree
+  =
   let current = ref [] in
   let descend
     (iter : unit -> unit)
@@ -238,6 +235,7 @@ let symbols_from_parsetree parsetree =
     match item.pstr_desc with
     | Pstr_type (_, decls) -> current := !current @ List.map decls ~f:type_document_symbol
     | Pstr_typext ext -> current := !current @ [ type_ext_document_symbol ext ]
+    | Pstr_primitive prim -> current := !current @ [ value_document_symbol prim ]
     | Pstr_module pmod ->
       descend
         (fun () -> iterator.module_expr iterator pmod.pmb_expr)
@@ -261,7 +259,8 @@ let symbols_from_parsetree parsetree =
   in
   let expr (iterator : Ast_iterator.iterator) (item : Parsetree.expression) =
     match item.pexp_desc with
-    | Pexp_let (_, _, bindings, inner) ->
+    | Pexp_let (_, _, bindings, inner)
+      when document_symbol_configuration.include_local_bindings ->
       let outer = !current in
       let bindings =
         List.concat_map bindings ~f:(fun (binding : Parsetree.value_binding) ->
@@ -307,16 +306,25 @@ let rec flatten_document_symbols ~uri ~container_name (symbols : DocumentSymbol.
     symbol_information :: children)
 ;;
 
-let run ~log_info (client_capabilities : ClientCapabilities.t) doc uri =
+let run ~log_info (state : State.t) doc uri =
   match Document.kind doc with
   | `Other -> Fiber.return None
   | `Merlin _ ->
+    let document_symbol_configuration =
+      Option.value
+        state.configuration.data.document_symbol
+        ~default:{ include_local_bindings = false }
+    in
     let+ symbols =
       Document.Merlin.with_pipeline_exn
         ~log_info
+        ~priority
         (Document.merlin_exn doc)
-        (fun pipeline -> Mpipeline.reader_parsetree pipeline |> symbols_from_parsetree)
+        (fun pipeline ->
+           Mpipeline.reader_parsetree pipeline
+           |> symbols_from_parsetree ~document_symbol_configuration)
     in
+    let client_capabilities = State.client_capabilities state in
     (match
        Option.value
          ~default:false

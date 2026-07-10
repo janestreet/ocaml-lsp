@@ -9,6 +9,14 @@ let run_with_modes f =
   f ()
 ;;
 
+let run_with_unix f =
+  let prev_win32 = !Lsp.Uri.Private.win32 in
+  Lsp.Uri.Private.win32 := false;
+  let result = f () in
+  Lsp.Uri.Private.win32 := prev_win32;
+  result
+;;
+
 let test_uri_parsing =
   let test s =
     let uri = Uri.t_of_yojson (`String s) in
@@ -25,9 +33,9 @@ let%expect_test "test uri parsing" =
     [ "file:///Users/foo"
     ; "file:///c:/Users/foo"
     ; "file:///foo?x=y"
-    ; "http://xyz?foo#"
-    ; "http://xxx?"
-    ; "http://xyz?ab%3D1%23"
+    ; "http://example?foo#"
+    ; "http://example?"
+    ; "http://example?ab%3D1%23"
     ];
   [%expect
     {|
@@ -36,22 +44,22 @@ let%expect_test "test uri parsing" =
     file:///c:/Users/foo -> c:/Users/foo
     file:///foo?x=y -> /foo?x=y
     query: x=y
-    http://xyz?foo# -> /?foo
+    http://example?foo# -> /?foo
     query: foo
-    http://xxx? -> /?
+    http://example? -> /?
     query:
-    http://xyz?ab%3D1%23 -> /?ab=1#
+    http://example?ab%3D1%23 -> /?ab=1#
     query: ab=1#
     Windows:
     file:///Users/foo -> \Users\foo
     file:///c:/Users/foo -> c:\Users\foo
     file:///foo?x=y -> \foo?x=y
     query: x=y
-    http://xyz?foo# -> \?foo
+    http://example?foo# -> \?foo
     query: foo
-    http://xxx? -> \?
+    http://example? -> \?
     query:
-    http://xyz?ab%3D1%23 -> \?ab=1#
+    http://example?ab%3D1%23 -> \?ab=1#
     query: ab=1#
     |}]
 ;;
@@ -313,4 +321,33 @@ let%expect_test "of_string -> to_path" =
      -> \
     file://LöC%2FAL/host:8080/projects/ -> \\LöC\AL\host:8080\projects\
     |}]
+;;
+
+let%expect_test "[split_on_share]" =
+  let uri =
+    Uri.of_path "/usr/local/home/user/workspaces/fe-123456789/+share+/foo/bar/baz.ml"
+  in
+  let before_share, share_and_after =
+    run_with_unix (fun () -> Uri.split_on_share uri) |> Option.get
+  in
+  print_endline (File_path.Absolute.to_string (File_path.Absolute.of_parts before_share));
+  [%expect {| /usr/local/home/user/workspaces/fe-123456789 |}];
+  print_endline
+    (File_path.Relative.to_string
+       (File_path.Relative.of_parts share_and_after |> Option.get));
+  [%expect {| +share+/foo/bar/baz.ml |}]
+;;
+
+let%expect_test "[workspace_and_relative_path]" =
+  let uri =
+    Uri.of_path "/usr/local/home/user/workspaces/fe-123456789/+share+/foo/bar/baz.ml"
+  in
+  let workspace, relpath =
+    (* workspace_and_relative_path uses File_path, which is unix-only. *)
+    run_with_unix (fun () -> Ocaml_lsp_uri.workspace_and_relative_path uri) |> Option.get
+  in
+  print_endline (File_path.Absolute.to_string workspace);
+  [%expect {| /usr/local/home/user/workspaces/fe-123456789/+share+ |}];
+  print_endline (File_path.Relative.to_string relpath);
+  [%expect {| foo/bar/baz.ml |}]
 ;;

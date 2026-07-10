@@ -1,20 +1,5 @@
-(executable
- (name main)
- (package ocaml-lsp-server)
- (public_name ocamllsp)
- (libraries
-   async
-   async_kernel
-   async_unix
-   async.async_command
-   base
-   core
-   core.command
-   core_unix.command_unix
-   core_unix.filename_unix
-   core_unix.signal_unix
-   lsp
-   ocaml_lsp_server)
+(executables
+ (names main main_do_not_deploy)
+ (modules main main_do_not_deploy main_impl)
  (preprocess (pps ppx_let ppx_sexp_conv))
- (instrumentation
-  (backend bisect_ppx)))
+ (libraries async core_unix.command_unix core core_unix.filename_unix lsp ocaml_lsp_misc_shims ocaml_lsp_server core_unix.signal_unix))

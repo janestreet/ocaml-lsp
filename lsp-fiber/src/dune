@@ -1,18 +1,5 @@
 (library
  (name lsp_fiber)
- (libraries
-  dyn
-  fiber
-  lev_fiber_async
-  jsonrpc
-  jsonrpc_fiber
-  lsp
-  ppx_yojson_conv_lib
-  stdune
-  yojson)
- (instrumentation
-  (backend bisect_ppx))
- (flags (
-   :standard
-   -open
-   Lev_fiber_async)))
+ (libraries core dyn ocaml_lsp_fiber jsonrpc_fiber lev_fiber_async lsp lsp_json_rpc_types yojson ocaml_lsp_stdune ocaml_lsp_fiber_shims)
+ (flags (:standard -w -69 -open Lsp_json_rpc_types -alert -private_lsp_library -open Lev_fiber_async))
+ (preprocess (pps ppx_yojson_conv ppx_sexp_message ppx_here)))

@@ -1,6 +1,8 @@
-open Stdune
 module String_zipper = Lsp.Private.String_zipper
 module Substring = Lsp.Private.Substring
+module List = Base.List
+
+let printfn a = Printf.ksprintf print_endline a
 
 let to_dyn { String_zipper.Private.left; rel_pos; current; right; line; abs_pos } =
   let open Dyn in
@@ -28,7 +30,7 @@ let test ?(which = `All) mode start operations =
       ~init:[ `Hide, start ]
       ~f:(fun acc (op : [ op | `Hide of op ]) ->
         let final =
-          let _, last = List.hd acc in
+          let _, last = List.hd_exn acc in
           let commit_op op =
             match op with
             | `Insert s -> String_zipper.insert last s
@@ -40,12 +42,12 @@ let test ?(which = `All) mode start operations =
         in
         final :: acc)
     |> List.rev
-    |> List.tl
+    |> List.tl_exn
   in
   let results =
     match which with
     | `All -> results
-    | `Last -> [ List.rev results |> List.hd ]
+    | `Last -> [ List.last_exn results ]
   in
   List.filter_map results ~f:(fun (display, res) ->
     match display with

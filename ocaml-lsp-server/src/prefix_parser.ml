@@ -39,8 +39,8 @@ include struct
 end
 
 let parse ~pos ~len text =
-  (*Attempt to match each of our possible prefix types, the order is important
-    because there is some overlap between the regexs*)
+  (* Attempt to match each of our possible prefix types, the order is important because
+     there is some overlap between the regexs *)
   let matched =
     List.find_map [ name_or_label; monadic_bind; infix_operator ] ~f:(fun regex ->
       Re.exec_opt ~pos ~len regex text)

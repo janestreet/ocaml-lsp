@@ -1,6 +1,8 @@
 open Import
 open Fiber.O
 
+let priority = Priorities.hover
+
 type mode =
   | Default
   | Extended_fixed of int
@@ -10,6 +12,13 @@ type extended_hover =
   { hover : Hover.t
   ; verbosity : int
   ; can_increase_verbosity : bool
+  }
+
+type verbose_hover =
+  { typ : string
+  ; kind : string option
+  ; mode : string option
+  ; verbosity : int
   }
 
 (* possibly overwrite the default mode using an environment variable *)
@@ -60,8 +69,7 @@ let hover_at_cursor parsetree position =
         else Ast_iterator.default_iterator.expr self expr
       | Pexp_function _ | Pexp_lazy _ ->
         (* Anonymous function expressions can be hovered on the keyword [fun] or
-           [function]. Lazy expressions can also be hovered on the [lazy]
-           keyword. *)
+           [function]. Lazy expressions can also be hovered on the [lazy] keyword. *)
         let is_at_keyword ~keyword ~(keyword_loc : Loc.t) =
           let keyword_len =
             match keyword with
@@ -123,8 +131,7 @@ let hover_at_cursor parsetree position =
       in
       match attribute_at_cursor with
       | Some attr ->
-        (* Produce a hover for the attribute, if it's name is hovered, otherwise
-           bail. *)
+        (* Produce a hover for the attribute, if it's name is hovered, otherwise bail. *)
         if is_at_cursor attr.attr_name.loc
         then result := Some (`Ppx_typedef_attr (decl, attr))
       | None -> Ast_iterator.default_iterator.type_declaration self decl)
@@ -169,12 +176,18 @@ let hover_at_cursor parsetree position =
   let signature_item (self : Ast_iterator.iterator) (item : Parsetree.signature_item) =
     match item.psig_desc with
     | Psig_open desc when is_at_cursor desc.popen_expr.loc ->
-      (* [open X] is not captured by [module_expr] since it uses a different
-         type in the AST. *)
+      (* [open X] is not captured by [module_expr] since it uses a different type in the
+         AST. *)
       result := Some `Type_enclosing
     | Psig_module desc when is_at_cursor desc.pmd_name.loc ->
       result := Some `Type_enclosing
     | _ -> Ast_iterator.default_iterator.signature_item self item
+  in
+  (* Hover jkind annotations *)
+  let jkind_annotation (self : Ast_iterator.iterator) (item : Parsetree.jkind_annotation) =
+    match item.pjka_desc with
+    | Pjk_abbreviation _ when is_at_cursor item.pjka_loc -> result := Some `Type_enclosing
+    | _ -> Ast_iterator.default_iterator.jkind_annotation self item
   in
   let iterator =
     { Ast_iterator.default_iterator with
@@ -187,6 +200,7 @@ let hover_at_cursor parsetree position =
     ; module_type
     ; structure_item
     ; signature_item
+    ; jkind_annotation
     }
   in
   let () =
@@ -209,23 +223,21 @@ let format_type_enclosing
   ~typ
   ~doc
   ~stack_or_heap
-  ~(syntax_doc : Query_protocol.Syntax_doc_result.t option)
+  ~kind
+  ~mode
+  ~syntax_doc
   =
-  (* TODO for vscode, we should just use the language id. But that will not work
-     for all editors *)
-  let syntax_doc =
-    Option.map syntax_doc ~f:(fun syntax_doc ->
-      let manual_sentence =
-        Option.value_map syntax_doc.documentation ~default:""
-        ~f:(fun doc_link -> sprintf " See [Manual](%s)" doc_link)
-      in
-      sprintf
-        "`syntax` %s: %s.%s"
-        syntax_doc.name
-        syntax_doc.description
-        manual_sentence)
-  in
   let stack_or_heap = Option.map ~f:(( ^ ) "Allocation: ") stack_or_heap in
+  let format ~label code =
+    let multiline = String.contains code '\n' in
+    match markdown, multiline with
+    | true, true -> [%string "%{label}:\n```ocaml\n%{code}\n```"]
+    | true, false -> [%string "%{label}: `%{code}`"]
+    | false, true -> [%string "%{label}:\n%{code}"]
+    | false, false -> [%string "%{label}: %{code}"]
+  in
+  let kind = Option.map kind ~f:(format ~label:"Kind") in
+  let mode = Option.map mode ~f:(format ~label:"Mode") in
   `MarkupContent
     (if markdown
      then (
@@ -238,12 +250,14 @@ let format_type_enclosing
              | Raw d -> d
              | Markdown d -> d)
          in
-         print_dividers (List.filter_opt [ type_info; syntax_doc; doc; stack_or_heap ])
+         print_dividers
+           (List.filter_opt [ type_info; syntax_doc; doc; stack_or_heap; kind; mode ])
        in
        { MarkupContent.value; kind = MarkupKind.Markdown })
      else (
        let value =
-         print_dividers (List.filter_opt [ Some typ; syntax_doc; doc; stack_or_heap ])
+         print_dividers
+           (List.filter_opt [ Some typ; syntax_doc; doc; stack_or_heap; kind; mode ])
        in
        { MarkupContent.value; kind = MarkupKind.PlainText }))
 ;;
@@ -253,15 +267,22 @@ let format_ppx_expansion ~ppx ~expansion =
   `MarkedString { Lsp.Types.MarkedString.value; language = Some "ocaml" }
 ;;
 
+let client_supports_markdown state =
+  let client_capabilities = State.client_capabilities state in
+  ClientCapabilities.markdown_support client_capabilities ~field:(fun td ->
+    Option.map td.hover ~f:(fun h -> h.contentFormat))
+;;
+
 let type_enclosing_hover
   ~log_info
   ~(server : State.t Server.t)
   ~(doc : Document.t)
-  ~with_syntax_doc
+  ~syntax_doc
   ~merlin
   ~mode
   ~uri
   ~position
+  ~markdown
   =
   let state = Server.state server in
   let verbosity =
@@ -280,7 +301,7 @@ let type_enclosing_hover
         match state.hover_extended.history with
         | None -> 0
         | Some (h_uri, h_position, h_verbosity) ->
-          if Uri.equal uri h_uri && Ordering.is_eq (Position.compare position h_position)
+          if Uri.equal uri h_uri && Int.equal (Position.compare position h_position) 0
           then succ h_verbosity
           else 0
       in
@@ -293,11 +314,20 @@ let type_enclosing_hover
       merlin
       (Position.logical position)
       verbosity
-      ~with_syntax_doc
+      ~syntax_doc
+      ~priority:Priorities.hover
   in
   match type_enclosing with
   | None -> Fiber.return None
-  | Some { Document.Merlin.loc; typ; doc = documentation; stack_or_heap; syntax_doc } ->
+  | Some
+      { Document.Merlin.loc
+      ; typ
+      ; doc = documentation
+      ; stack_or_heap
+      ; kind
+      ; mode
+      ; syntax_doc
+      } ->
     let syntax = Document.syntax doc in
     let* typ =
       (* We ask Ocamlformat to format this type *)
@@ -305,7 +335,7 @@ let type_enclosing_hover
       match result with
       | Ok v ->
         (* OCamlformat adds an unnecessay newline at the end of the type *)
-        Fiber.return (String.trim v)
+        Fiber.return (String.strip v)
       | Error `No_process -> Fiber.return typ
       | Error (`Msg message) ->
         (* We log OCamlformat errors and display the unformated type *)
@@ -321,22 +351,19 @@ let type_enclosing_hover
         typ
     in
     let contents =
-      let markdown =
-        let client_capabilities = State.client_capabilities state in
-        ClientCapabilities.markdown_support client_capabilities ~field:(fun td ->
-          Option.map td.hover ~f:(fun h -> h.contentFormat))
-      in
       format_type_enclosing
         ~syntax
         ~markdown
         ~typ
         ~doc:documentation
         ~stack_or_heap
+        ~kind
+        ~mode
         ~syntax_doc
     in
     let range = Range.of_loc loc in
     let hover = Hover.create ~contents ~range () in
-    Fiber.return (Some (`Type (typ, verbosity), hover))
+    Fiber.return (Some (`Type { typ; verbosity; kind; mode }, hover))
 ;;
 
 let ppx_expression_hover
@@ -436,9 +463,9 @@ let typedef_attribute_hover
         Some (Format.flush_str_formatter ())
       | [], structure -> Some (Pprintast.string_of_structure (List.rev structure))
       | _ :: _, _ :: _ ->
-        (* This should not be possible, unless a PPXs provides incorrect
-           position information that places items from a [sig end] into a
-           [struct end] or vice versa. *)
+        (* This should not be possible, unless a PPXs provides incorrect position
+           information that places items from a [sig end] into a [struct end] or vice
+           versa. *)
         None
     in
     Option.map expansion ~f:(fun expansion ->
@@ -449,55 +476,144 @@ let typedef_attribute_hover
   | _ -> None
 ;;
 
-let handle_internal
+let handle_using_merlin
   ~log_info
   server
+  doc
   { HoverParams.textDocument = { uri }; position; _ }
   mode
   =
-  Fiber.of_thunk (fun () ->
-    let state : State.t = Server.state server in
-    let doc =
-      let store = state.store in
-      Document_store.get store uri
+  let state : State.t = Server.state server in
+  match Document.kind doc with
+  | `Other -> Fiber.return None
+  | `Merlin merlin ->
+    let* parsetree =
+      Document.Merlin.with_pipeline_exn
+        ~priority
+        ~log_info
+        (Document.merlin_exn doc)
+        (fun pipeline -> Mpipeline.reader_parsetree pipeline)
     in
-    match Document.kind doc with
-    | `Other -> Fiber.return None
-    | `Merlin merlin ->
-      let* parsetree =
-        Document.Merlin.with_pipeline_exn
-          ~log_info
-          (Document.merlin_exn doc)
-          (fun pipeline -> Mpipeline.reader_parsetree pipeline)
-      in
-      (match hover_at_cursor parsetree position with
-       | None -> Fiber.return None
-       | Some `Type_enclosing ->
-         let with_syntax_doc =
-           match state.configuration.data.syntax_documentation with
-           | Some { enable = true } -> true
-           | Some _ | None -> false
+    let markdown = client_supports_markdown state in
+    let* syntax_doc =
+      match state.configuration.data.syntax_documentation with
+      | Some { enable = true } ->
+        let* syntax_doc =
+          Document.Merlin.with_pipeline_exn
+            ~log_info
+            ~priority
+            (Document.merlin_exn doc)
+            (fun pipeline ->
+               Document.Merlin.syntax_doc pipeline (Position.logical position))
+        in
+        (* TODO for vscode, we should just use the language id. But that will not work for
+           all editors *)
+        let syntax_doc =
+          Option.map syntax_doc ~f:(fun syntax_doc ->
+            let manual_sentence =
+              Option.value_map syntax_doc.documentation ~default:"" ~f:(fun doc_link ->
+                match markdown with
+                | true -> sprintf " See [Manual](%s)" doc_link
+                | false -> sprintf " See the manual: %s" doc_link)
+            in
+            sprintf
+              "`syntax` %s: %s%s"
+              syntax_doc.name
+              syntax_doc.description
+              manual_sentence)
+        in
+        Fiber.return syntax_doc
+      | Some _ | None -> Fiber.return None
+    in
+    (match hover_at_cursor parsetree position with
+     | None ->
+       Option.map syntax_doc ~f:(fun syntax_doc ->
+         let kind : MarkupKind.t =
+           match markdown with
+           | true -> Markdown
+           | false -> PlainText
          in
-         type_enclosing_hover
+         let contents = `MarkupContent (MarkupContent.create ~kind ~value:syntax_doc) in
+         let hover =
+           Hover.create ~contents ~range:(Range.create ~start:position ~end_:position) ()
+         in
+         `Syntax_doc, hover)
+       |> Fiber.return
+     | Some `Type_enclosing ->
+       type_enclosing_hover
+         ~log_info
+         ~server
+         ~doc
+         ~merlin
+         ~mode
+         ~uri
+         ~position
+         ~syntax_doc
+         ~markdown
+     | Some ((`Ppx_expr _ | `Ppx_typedef_attr _) as ppx_kind) ->
+       let+ ppx_parsetree =
+         Document.Merlin.with_pipeline_exn
            ~log_info
-           ~server
-           ~doc
-           ~merlin
-           ~mode
-           ~uri
-           ~position
-           ~with_syntax_doc
-       | Some ((`Ppx_expr _ | `Ppx_typedef_attr _) as ppx_kind) ->
-         let+ ppx_parsetree =
-           Document.Merlin.with_pipeline_exn
-             ~log_info
-             (Document.merlin_exn doc)
-             (fun pipeline -> Mpipeline.ppx_parsetree pipeline)
-         in
-         (match ppx_kind with
-          | `Ppx_expr (expr, ppx) -> ppx_expression_hover ~ppx_parsetree ~expr ~ppx
-          | `Ppx_typedef_attr (decl, attr) ->
-            typedef_attribute_hover ~ppx_parsetree ~decl ~attr)))
+           ~priority
+           (Document.merlin_exn doc)
+           (fun pipeline -> Mpipeline.ppx_parsetree pipeline)
+       in
+       (match ppx_kind with
+        | `Ppx_expr (expr, ppx) -> ppx_expression_hover ~ppx_parsetree ~expr ~ppx
+        | `Ppx_typedef_attr (decl, attr) ->
+          typedef_attribute_hover ~ppx_parsetree ~decl ~attr))
+;;
+
+let with_remote_lsp_warning contents =
+  (* Two newlines ensure that the warning occurs on a separate line from docs and
+     "Allocation: xxx" messages. *)
+  let message = "\n\nMay not be up to date (`remote-lsp`)" in
+  match contents with
+  | `MarkupContent { MarkupContent.kind; value } ->
+    `MarkupContent { MarkupContent.kind; value = value ^ message }
+  | `MarkedString (s : Lsp.Types.MarkedString.t) ->
+    `MarkedString { s with value = s.value ^ message }
+  | `List marked_strings ->
+    `List
+      (marked_strings @ [ { Lsp.Types.MarkedString.value = message; language = None } ])
+;;
+
+let handle_using_remote_lsp ~log_info state uri position =
+  match Remote_lsp.hover_query ~log_info state uri position with
+  | Some hover ->
+    let+ hover = hover in
+    Option.map
+      ~f:(fun hover ->
+        `Remote, { hover with contents = with_remote_lsp_warning hover.contents })
+      hover
+  | None -> Fiber.return None
+;;
+
+let handle_internal
+  ~log_info
+  server
+  ({ HoverParams.textDocument = { uri }; position; _ } as params)
+  mode
+  =
+  let state : State.t = Server.state server in
+  let doc = Document_store.get state.store uri in
+  let* merlin_can_answer_queries =
+    Merlin_status.merlin_can_answer_queries ~log_info state uri
+  in
+  Fiber.of_thunk (fun () ->
+    (* If we are in a test, merlin will not be configured, but will still be able answer
+       queries as it won't have to cross file boundaries. Querying remote-lsp is thus a)
+       unnecessary and b) likely to fail as the test LSP was probably not first passed a
+       file with a valid feature-id (e.g. "foo.ml"). *)
+    match merlin_can_answer_queries || Core.am_running_test with
+    | true -> handle_using_merlin ~log_info server doc params mode
+    | false ->
+      (* Since merlin doesn't have the requisite build artifacts, it will most likely
+         produce an uninformative hover like ['a] or [sig end], so fall back to remote-lsp
+         if enabled and available. *)
+      if State.should_fall_back state
+      then handle_using_remote_lsp ~log_info state uri position
+      else Fiber.return None)
 ;;
 
 let handle ~log_info server params =
@@ -521,19 +637,39 @@ let handle_extended ~log_info server params ~verbosity =
     handle_internal ~log_info server params mode
   in
   match hover with
-  | Some (`Type (unformatted_hover_text, verbosity), hover) ->
+  | Some
+      ( `Type
+          { typ = unformatted_hover_text; verbosity; kind = kind_text; mode = mode_text }
+      , hover ) ->
     let+ can_increase_verbosity =
-      let next_verbosity = verbosity + 1 in
-      let state = Server.state server in
-      let hover_history = state.hover_extended.history in
-      let+ hover_next =
-        handle_internal ~log_info server params (Extended_fixed next_verbosity)
-      in
-      state.hover_extended.history <- hover_history;
-      match hover_next with
-      | Some (`Type (more_verbose_text, _), _) ->
-        not (String.equal unformatted_hover_text more_verbose_text)
-      | _ -> false
+      (* When verbosity is 0, always return true. This avoids computing the next hover
+         when verbosity = 0, which provides a minor performance improvement. Due to kind
+         and mode hovers, this is usually true anyways. And the cost of a false positive
+         here is low. *)
+      if verbosity = 0
+      then Fiber.return true
+      else (
+        let next_verbosity = verbosity + 1 in
+        let state = Server.state server in
+        let hover_history = state.hover_extended.history in
+        let+ hover_next =
+          handle_internal ~log_info server params (Extended_fixed next_verbosity)
+        in
+        state.hover_extended.history <- hover_history;
+        match hover_next with
+        | Some
+            ( `Type
+                { typ = more_verbose_text
+                ; kind = more_kind_text
+                ; mode = more_mode_text
+                ; _
+                }
+            , _ ) ->
+          not
+            (String.equal unformatted_hover_text more_verbose_text
+             && Option.equal String.equal kind_text more_kind_text
+             && Option.equal String.equal mode_text more_mode_text)
+        | _ -> false)
     in
     Some { hover; verbosity; can_increase_verbosity }
   | Some (_, hover) ->

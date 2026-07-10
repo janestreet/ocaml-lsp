@@ -1,44 +1,8 @@
-(env
- (_
-  (env-vars
-   (OCAMLLSP_TEST true)
-   (LEV_DEBUG 1))))
-
 (library
- (name ocaml_lsp_e2e)
+ (name ocaml_lsp_e2e_tests)
+ (libraries async core expect_test_helpers_async ocaml_lsp_fiber lev_fiber_async lsp lsp_fiber lsp_json_rpc_types ocaml_lsp_fiber_shims ocaml_lsp_test_lib ocaml_lsp_server spawn unix yojson)
  (inline_tests
-  (enabled_if
-   (= %{os_type} Unix))
-  (deps
-;   %{bin:ocamlformat-rpc}
-   for_ppx.ml
-   (package ocaml-lsp-server)))
- (libraries
-  async
-  async_kernel
-  base
-  core
-  expectree
-  fiber
-  fiber_async
-  yojson
-  lev_fiber_async
-  ocaml_lsp_server
-  spawn
-  jsonrpc
-  lsp
-  lsp_fiber
-  ;; This is because of the (implicit_transitive_deps false)
-  ;; in dune-project
-  ppx_expect.config
-  ppx_expect.config_types
-  ppx_expect.runtime_types
-  ppx_inline_test.config
-  ppx_yojson_conv_lib
-  stdune
-  unix)
- (preprocess (pps ppx_jane))
- (flags (
-   :standard
-   -open
-   Lev_fiber_async)))
+ (flags (-verbose))
+  (deps %{exe:../../bin/main.exe}))
+ (flags (:standard -open Lsp_json_rpc_types -alert -private_lsp_library -open Lev_fiber_async))
+ (preprocess (pps ppx_let ppx_expect -no-locations-check -expect-test-strict-indentation=false)))

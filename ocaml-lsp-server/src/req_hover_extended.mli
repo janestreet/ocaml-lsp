@@ -30,7 +30,7 @@ val get_doc_id : params:Jsonrpc.Structured.t option -> TextDocumentIdentifier.t 
 val get_pos : params:Jsonrpc.Structured.t option -> Position.t option
 
 val on_request
-  :  log_info:Lsp_timing_logger.t
+  :  log_info:Log_info.t
   -> params:Jsonrpc.Structured.t option
   -> State.t Server.t
   -> Json.t Fiber.t

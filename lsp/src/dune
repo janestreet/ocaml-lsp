@@ -1,16 +1,9 @@
-(include_subdirs unqualified)
-
 (library
  (name lsp)
- (public_name lsp)
- (libraries base jsonrpc ppx_yojson_conv_lib uutf yojson)
- (preprocess
-  (pps ppx_yojson_conv))
- (instrumentation
-  (backend bisect_ppx)))
 
-(cinaps
- (files types.ml types.mli)
- (libraries lsp_gen))
+ (libraries base core lsp_json_rpc_types ocaml_lsp_dune_integration file_path ocaml_lsp_misc_shims ppx_yojson_conv_lib uutf yojson)
+ (flags (:standard -open Lsp_json_rpc_types -alert -private_lsp_library -w -60))
+ (preprocess
+  (pps ppx_bin_prot ppx_compare ppx_sexp_conv ppx_yojson_conv ppx_js_style ppx_let -allow-let-operators -no-locations-check)))
 
 (ocamllex uri_lexer)

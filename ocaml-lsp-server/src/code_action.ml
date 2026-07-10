@@ -2,8 +2,7 @@ open Import
 
 (* TODO:
 
-   - split the "needs merlin" part of the action out so that all actions can be
-     batched *)
+   - split the "needs merlin" part of the action out so that all actions can be batched *)
 
 type t =
   { kind : CodeActionKind.t
@@ -11,7 +10,7 @@ type t =
       [ `Batchable of
         Mpipeline.t -> Document.t -> CodeActionParams.t -> CodeAction.t option
       | `Non_batchable of
-        log_info:Lsp_timing_logger.t
+        log_info:Log_info.t
         -> Document.t
         -> CodeActionParams.t
         -> CodeAction.t option Fiber.t

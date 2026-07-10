@@ -1,7 +1,13 @@
 open Import
 
+val prepare_rename
+  :  log_info:Log_info.t
+  -> State.t
+  -> PrepareRenameParams.t
+  -> Range.t option Fiber.t
+
 val rename
-  :  log_info:Lsp_timing_logger.t
+  :  log_info:Log_info.t
   -> State.t
   -> RenameParams.t
-  -> WorkspaceEdit.t Fiber.t
+  -> WorkspaceEdit.t option Fiber.t

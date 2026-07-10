@@ -92,8 +92,8 @@ module Request_params = struct
   ;;
 end
 
-let dispatch ~log_info ~merlin ~position ~identifier ~contentFormat =
-  Document.Merlin.with_pipeline_exn ~log_info merlin (fun pipeline ->
+let dispatch ~log_info ~merlin ~position ~identifier ~contentFormat ~priority =
+  Document.Merlin.with_pipeline_exn ~log_info ~priority merlin (fun pipeline ->
     let position = Position.logical position in
     let query = Query_protocol.Document (identifier, position) in
     let result = Query_commands.dispatch pipeline query in
@@ -118,5 +118,12 @@ let on_request ~log_info ~params state =
     let doc = Document_store.get state.State.store uri in
     match Document.kind doc with
     | `Other -> Fiber.return `Null
-    | `Merlin merlin -> dispatch ~log_info ~merlin ~position ~identifier ~contentFormat)
+    | `Merlin merlin ->
+      dispatch
+        ~log_info
+        ~merlin
+        ~position
+        ~identifier
+        ~contentFormat
+        ~priority:Priorities.get_documentation)
 ;;

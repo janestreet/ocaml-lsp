@@ -1,7 +1,7 @@
 open Import
 
 val run
-  :  log_info:Lsp_timing_logger.t
+  :  log_info:Log_info.t
   -> State.t
   -> SignatureHelpParams.t
-  -> SignatureHelp.t Fiber.t
+  -> SignatureHelp.t option Fiber.t

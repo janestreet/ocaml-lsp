@@ -1,6 +1,6 @@
 open Core
 open Async
-open Fiber_async
+open Ocaml_lsp_fiber_shims.Fiber_async
 open Lev_fiber_async_intf
 
 let default_backtrace =
@@ -11,6 +11,22 @@ let default_backtrace =
      to conform to the [Thread] API, we always need to return a backtrace with an
      exception so we return this default one in the would-be [None] case. *)
   Backtrace.get ~at_most_num_frames:2 ()
+;;
+
+let%expect_test "[default_backtrace] includes its location in the trace" =
+  let () = Ocaml_lsp_misc_shims.elide_backtrace false in
+  let default_backtrace_includes_its_location =
+    String.is_substring
+      (Backtrace.to_string default_backtrace)
+      ~substring:"Called from Lev_fiber_async.default_backtrace"
+  in
+  if not default_backtrace_includes_its_location
+  then
+    print_s
+      [%message
+        "[default_backtrace] does not include its location in the trace"
+          (default_backtrace : Backtrace.t)];
+  return ()
 ;;
 
 module Types = struct
@@ -133,17 +149,12 @@ module Lev_fiber = struct
           Signal.handle
             ~stop:(Ivar.read received)
             [ Signal.of_caml_int signal ]
-            ~f:(fun (_ : Signal.t) ->
-              (* ddickstein: The implementation of [Signal.handle] doesn't convince me
-                 that this can't be called again after [stop] is filled before the [upon]
-                 callback removes the registered handler, so I'm using
-                 [Ivar.fill_if_empty] to be safe. *)
-              Ivar.fill_if_empty received ());
+            ~f:(fun (_ : Signal.t) -> Ivar.fill_if_empty received ());
           Ivar.read received |> fiber_of_deferred)
       ;;
 
       module Thread = struct
-        module Exn_with_backtrace = Stdune.Exn_with_backtrace
+        module Exn_with_backtrace = Ocaml_lsp_stdune.Exn_with_backtrace
 
         type 'a task =
           { f : unit -> 'a
@@ -194,8 +205,6 @@ module Lev_fiber = struct
                                let exn = Monitor.Monitor_exn.extract_exn exn in
                                Error (`Exn { Exn_with_backtrace.exn; backtrace })
                              | Error exn ->
-                               (* ddickstein: I don't think we will hit this case, but
-                                  I've implemented it in case we do. *)
                                let backtrace =
                                  Backtrace.Exn.most_recent_for_exn exn
                                  |> Option.value ~default:default_backtrace
@@ -427,8 +436,6 @@ module Lev_fiber = struct
 end
 
 module Lev_fiber_csexp = struct
-  (* CR-someday ddickstein: Once https://github.com/ocaml-dune/csexp/issues/19 is
-     resolved, remove this module. *)
   module Conv = struct
     (* We use a copy of [Csexp.Sexp] here to avoid relying on it - it's worth taking extra
        precautions around [Obj.magic]. *)

@@ -1,0 +1,11 @@
+(rule
+ (target ocaml_lsp_dune_integration.ml)
+ (deps ocaml_lsp_dune_integration.oss-specific.ml)
+ (action
+  (copy %{dep:ocaml_lsp_dune_integration.oss-specific.ml} %{target})))
+
+(library
+ (name ocaml_lsp_dune_integration)
+ (modules ocaml_lsp_dune_integration)
+ (libraries async core file_path)
+ (preprocess (pps ppx_compare ppx_sexp_conv ppx_let)))

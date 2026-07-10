@@ -1,23 +1,38 @@
 open Import
+module Diagnostic_parser = Ocaml_lsp_dune_integration.Diagnostic_parser
+
+let priority = Priorities.diagnostics
+
+(* NB: Changing when diagnostics are sent, in particular, eliminating instances when
+   diagnostics are sent, can cause tests to hang. This is because they wait for
+   diagnostics to arrive as a signal that the LSP is done processing. *)
 
 let ocamllsp_source = "ocamllsp"
-let dune_source = "dune"
+let merlin_source = "lsp/merlin"
+let dune_source = "lsp/dune"
 
-module Uri = struct
-  include Uri
-
-  let compare x y = Ordering.of_int (Uri.compare x y)
-end
-
-module Uri_c = Comparable.Make (Uri)
+module Uri_c = Comparable.Make_plain (Uri)
 module Uri_set = Uri_c.Set
 
 module Id = struct
-  include Drpc.V1.Diagnostic.Id
-
-  let equal x y = compare x y = Eq
-  let to_dyn = Dyn.opaque
+  module T = Drpc.Diagnostic.Id
+  include T
+  module Table = Core.Hashtbl.Make_plain (T)
 end
+
+let remove_errno msg =
+  (* Merlin errors are sometimes prefixed with "Error (warning ..): ..." as opposed to
+     Dune's, which are sometimes prefixed with "(warning .. [...]): ...". Perhaps it may
+     be better to investigate why this is, but it doesn't hurt to just filter that out. *)
+  match
+    Re.Str.bounded_split
+      (Re.Str.regexp {|^Error (warning [0-9]+): \|^(warning [0-9]+ \[[a-z-]+\]): |})
+      msg
+      1
+  with
+  | [ rest ] when not (String.equal rest msg) -> rest
+  | _ -> msg
+;;
 
 let equal_message =
   (* because the compiler and merlin wrap messages differently *)
@@ -29,14 +44,6 @@ let equal_message =
     while !i < String.length s && is_space s.[!i] do
       incr i
     done
-  in
-  let remove_errno msg =
-    (* Sometimes errors (in my testing, specifically from Merlin) are prefixed with
-       "Error (warning ..): ..." while Dune errors are not. Perhaps it may be better
-       to investigate why this is, but it doesn't hurt to just filter that out. *)
-    match Re.Str.bounded_split (Re.Str.regexp "^Error (warning [0-9]+): ") msg 2 with
-    | [ rest ] -> rest
-    | _ -> msg
   in
   fun m1 m2 ->
     (* Merlin errors that are warnings start with a message of the form Error (warning ..)
@@ -70,25 +77,31 @@ let equal_message =
 ;;
 
 type t =
-  { dune : (Id.t, Uri.t * Diagnostic.t) Table.t
-  ; merlin : (Uri.t, Diagnostic.t list) Table.t
-  ; send : PublishDiagnosticsParams.t list -> unit Fiber.t
-  ; mutable dirty_uris : Uri_set.t
+  { dune : (Uri.t * Diagnostic.t) list Id.Table.t
+  (** Dune sends diagnostics in batches which are keyed by unique id *)
+  ; send : PublishDiagnosticsParams.t -> unit Fiber.t
+  (** Callback to send diagnostics to client. *)
+  ; mutable updated_dune_uris : Uri.t list
+  (** URIs whose dune diagnostics were changed since the last build. This is used to
+      determine which files to refresh diagnostics for after a build finishes. This field
+      can be slightly incorrect if dune diagnostics for a build arrive after the progress
+      notification indicating the build is done. *)
   ; related_information : bool
-  ; tags : DiagnosticTag.t list
-  ; mutable display_merlin_diagnostics : bool
-  ; mutable shorten_merlin_diagnostics : bool
+  ; supported_tags : DiagnosticTag.t list
   ; client_name : string
+  ; mutable which_diagnostics : Config_data.WhichDiagnostics.t
+  ; mutable shorten_merlin_diagnostics : bool
+  (** Whether to shorten the range of merlin diagnostics we send to the client. *)
   }
 
 let create
   (capabilities : PublishDiagnosticsClientCapabilities.t option)
   send
-  ~display_merlin_diagnostics
+  ~which_diagnostics
   ~shorten_merlin_diagnostics
   ~client_name
   =
-  let related_information, tags =
+  let related_information, supported_tags =
     match capabilities with
     | None -> false, []
     | Some c ->
@@ -97,147 +110,98 @@ let create
          | None -> []
          | Some { valueSet } -> valueSet) )
   in
-  { dune = Table.create (module Id) 32
-  ; merlin = Table.create (module Uri) 32
-  ; dirty_uris = Uri_set.empty
+  { dune = Id.Table.create ~size:32 ()
   ; send
+  ; updated_dune_uris = []
   ; related_information
-  ; tags
-  ; display_merlin_diagnostics
+  ; supported_tags
+  ; which_diagnostics
   ; shorten_merlin_diagnostics
   ; client_name = String.lowercase client_name
   }
 ;;
 
-let send =
-  let module Range_map = Map.Make (Range) in
+let send t uri ~merlin_diagnostics =
+  let module Range_map = Map.Make_plain (Range) in
   (* TODO deduplicate related errors as well *)
-  (* Adds the provided diagnostic if and only if it's not one of the dune diagnostics at
-     that location *)
-  let add_merlin_diagnostic
-    t
-    ~dune_diagnostics_table
-    ~merlin_diagnostics_table
-    uri
-    (diagnostic : Diagnostic.t)
-    =
-    let merlin_diagnostics_for_file =
-      Table.find_or_add merlin_diagnostics_table uri ~f:(fun _ -> [])
-    in
-    let merlin_diagnostics_for_file =
-      let dune_map =
-        Table.find dune_diagnostics_table uri |> Option.value ~default:Range_map.empty
+  let dune_diagnostics_for_uri =
+    Hashtbl.fold t.dune ~init:[] ~f:(fun ~key:_ ~data:batch acc ->
+      let diagnostics_for_uri =
+        List.filter_map batch ~f:(fun (dune_uri, diagnostic) ->
+          if Uri.equal dune_uri uri then Some diagnostic else None)
       in
-      match Range_map.find dune_map diagnostic.range with
-      | None -> diagnostic :: merlin_diagnostics_for_file
-      | Some dune_diagnostics ->
-        if String.starts_with ~prefix:"vscode" t.client_name
-           && List.exists dune_diagnostics ~f:(fun (d : Diagnostic.t) ->
-             match d.source with
-             | None ->
-               failwith "BUG: source of a diagnostic was not set, when it should be"
-             | Some source ->
-               String.equal dune_source source
-               &&
-                 (match d.message, diagnostic.message with
-                 | `String m1, `String m2 -> equal_message m1 m2
-                 | `MarkupContent { kind; value }, `MarkupContent mc ->
-                   Poly.equal kind mc.kind && equal_message value mc.value
-                 | _, _ -> false))
-        then merlin_diagnostics_for_file
-        else diagnostic :: merlin_diagnostics_for_file
-    in
-    Table.set merlin_diagnostics_table uri merlin_diagnostics_for_file
+      diagnostics_for_uri @ acc)
   in
-  let range_map_of_unduplicated_diagnostics diagnostics =
-    List.rev_map diagnostics ~f:(fun (d : Diagnostic.t) -> d.range, d)
-    |> Range_map.of_list_multi
+  let dune_diagnostics_by_range =
+    dune_diagnostics_for_uri
+    |> List.map ~f:(fun (d : Diagnostic.t) -> d.range, d)
+    |> Range_map.of_alist_multi
   in
-  fun t which ->
-    Fiber.of_thunk (fun () ->
-      let dirty_uris =
-        match which with
-        | `All -> t.dirty_uris
-        | `One uri -> Uri_set.singleton uri
+  (* Checks if [diagnostic] is a duplicate of a preexisting dune diagnostic. *)
+  let is_a_duplicate (merlin_diagnostic : Diagnostic.t) =
+    match Map.find dune_diagnostics_by_range merlin_diagnostic.range with
+    | None -> false
+    | Some dune_diagnostics ->
+      let equiv_message (d1 : Diagnostic.t) (d2 : Diagnostic.t) =
+        match d1.message, d2.message with
+        | `String m1, `String m2 -> equal_message m1 m2
+        | `MarkupContent { kind; value }, `MarkupContent mc ->
+          Poly.equal kind mc.kind && equal_message value mc.value
+        | _, _ -> false
       in
-      let dune_diagnostics_table = Table.create (module Uri) 4 in
-      let merlin_diagnostics_table = Table.create (module Uri) 4 in
-      Uri_set.iter dirty_uris ~f:(fun uri ->
-        let just_uri = Uri_set.singleton uri in
-        let dune_diagnostics =
-          Table.fold
-            ~init:[]
-            ~f:(fun (diagnostic_uri, diagnostic) acc ->
-              if Uri_set.mem just_uri diagnostic_uri then diagnostic :: acc else acc)
-            t.dune
-        in
-        Table.set
-          dune_diagnostics_table
-          uri
-          (range_map_of_unduplicated_diagnostics dune_diagnostics);
-        Table.set merlin_diagnostics_table uri []);
-      Table.foldi ~init:() t.merlin ~f:(fun uri diagnostics () ->
-        if Uri_set.mem dirty_uris uri
-        then
-          List.iter diagnostics ~f:(fun diagnostic ->
-            add_merlin_diagnostic
-              t
-              ~dune_diagnostics_table
-              ~merlin_diagnostics_table
-              uri
-              diagnostic));
-      t.dirty_uris
-      <- (match which with
-          | `All -> Uri_set.empty
-          | `One uri -> Uri_set.remove t.dirty_uris uri);
-      Table.foldi merlin_diagnostics_table ~init:[] ~f:(fun uri diagnostics acc ->
-        (* we don't include a version because some of the diagnostics might come from
-           dune which reads from the file system and not from the editor's view *)
-        PublishDiagnosticsParams.create ~uri ~diagnostics () :: acc)
-      |> t.send)
-;;
-
-let set t what =
-  let uri =
-    match what with
-    | `Dune (_, uri, _) -> uri
-    | `Merlin (uri, _) -> uri
+      List.exists dune_diagnostics ~f:(fun (d : Diagnostic.t) ->
+        equiv_message d merlin_diagnostic)
   in
-  t.dirty_uris <- Uri_set.add t.dirty_uris uri;
-  match what with
-  | `Merlin (uri, diagnostics) -> Table.set t.merlin uri diagnostics
-  | `Dune (id, uri, diagnostics) -> Table.set t.dune id (uri, diagnostics)
+  let deduplicated_merlin_diagnostics =
+    if String.is_prefix t.client_name ~prefix:"vscode"
+    then List.filter merlin_diagnostics ~f:(fun d -> not (is_a_duplicate d))
+    else merlin_diagnostics
+  in
+  (* Add outbound dune diagnostics only if asked for. *)
+  let outbound_dune_diagnostics =
+    if t.which_diagnostics.dune then dune_diagnostics_for_uri else []
+  in
+  let outbound_diagnostics =
+    (* We don't include a version because some of the diagnostics might come from dune
+       which reads from the file system and not from the editor's view. *)
+    PublishDiagnosticsParams.create
+      ~uri
+      ~diagnostics:(outbound_dune_diagnostics @ deduplicated_merlin_diagnostics)
+      ()
+  in
+  t.send outbound_diagnostics
 ;;
 
-let remove t = function
-  | `Dune diagnostic ->
-    Table.find t.dune diagnostic
-    |> Option.iter ~f:(fun (uri, _) ->
-      Table.remove t.dune diagnostic;
-      t.dirty_uris <- Uri_set.add t.dirty_uris uri)
-  | `Merlin uri ->
-    t.dirty_uris <- Uri_set.add t.dirty_uris uri;
-    Table.remove t.merlin uri
+let add_dune_diagnostics t (batch_id, batch) =
+  List.iter batch ~f:(fun (uri, _) -> t.updated_dune_uris <- uri :: t.updated_dune_uris);
+  Hashtbl.set t.dune ~key:batch_id ~data:batch
 ;;
 
-let tags_of_message =
-  let tags_of_message ~src message : DiagnosticTag.t option =
+let remove_dune_diagnostics t batch_id =
+  Hashtbl.find t.dune batch_id
+  |> Option.iter ~f:(fun batch ->
+    List.iter batch ~f:(fun (uri, _) -> t.updated_dune_uris <- uri :: t.updated_dune_uris);
+    Hashtbl.remove t.dune batch_id)
+;;
+
+(** Get the supported diagnostic tags of a message. *)
+let tags_of_message t ~src message =
+  let (tag : DiagnosticTag.t option) =
     match src with
     | `Dune when String.is_prefix message ~prefix:"unused" -> Some Unnecessary
     | `Merlin when Diagnostic_util.is_unused_var_warning message -> Some Unnecessary
     | `Merlin when Diagnostic_util.is_deprecated_warning message -> Some Deprecated
     | `Dune | `Merlin -> None
   in
-  fun t ~src message ->
-    match tags_of_message ~src message with
-    | None -> None
-    | Some tag -> Option.some_if (List.mem t.tags tag ~equal:Poly.equal) [ tag ]
+  match tag with
+  | Some tag when List.mem t.supported_tags tag ~equal:Poly.equal -> Some [ tag ]
+  | None | Some _ -> None
 ;;
 
 let extract_related_errors uri raw_message =
   match Ocamlc_loc.parse_raw raw_message with
   | `Message message :: related ->
-    let string_of_message message = String.trim message in
+    let string_of_message message = String.strip message in
     let related =
       let rec loop acc = function
         | `Loc loc :: `Message m :: xs -> loop ((loc, m) :: acc) xs
@@ -291,9 +255,8 @@ let first_n_lines_of_range (range : Range.t) n : Range.t =
     }
 ;;
 
-let default_error_to_diagnostic ~diagnostics ~merlin ~error =
+let merlin_report_to_diagnostic ~diagnostics ~merlin ~error =
   let doc = Document.Merlin.to_doc merlin in
-  let create_diagnostic = Diagnostic.create ~source:ocamllsp_source in
   let uri = Document.uri doc in
   let loc = Loc.loc_of_report error in
   let original_range = Range.of_loc loc in
@@ -307,7 +270,9 @@ let default_error_to_diagnostic ~diagnostics ~merlin ~error =
     | Warning -> DiagnosticSeverity.Warning
     | _ -> DiagnosticSeverity.Error
   in
-  let make_message ppf m = String.trim (Format.asprintf "%a@." ppf m) in
+  let make_message ppf m = String.strip (Format.asprintf "%a@." ppf m) in
+  (* NB: as of 2025-06-09 the formatter [Loc.print_main] can raise due to a bug in the
+     short-paths logic in merlin *)
   let message = make_message Loc.print_main error in
   let message, relatedInformation =
     match diagnostics.related_information with
@@ -330,11 +295,6 @@ let default_error_to_diagnostic ~diagnostics ~merlin ~error =
     match diagnostics.shorten_merlin_diagnostics with
     | false -> None
     | true ->
-      (* NOTE: in VSCode, the message displayed for related information currently shows
-         only the start of the span. It's still possible to find the full span, so we've
-         opted not to send a second related-information with the end of the range, but in
-         the future we could look into changing how VSCode displays relatedInformation
-         ranges. *)
       let start_location = Location.create ~range:original_range ~uri in
       Some
         [ DiagnosticRelatedInformation.create
@@ -346,21 +306,41 @@ let default_error_to_diagnostic ~diagnostics ~merlin ~error =
     Option.merge maybe_extra_range_information relatedInformation ~f:( @ )
   in
   let tags = tags_of_message diagnostics ~src:`Merlin message in
-  create_diagnostic
+  Diagnostic.create
     ?tags
     ?relatedInformation
     ~range
+    ~source:merlin_source
     ~message:(`String message)
     ~severity
     ()
 ;;
 
+let diagnostic_of_lrgrep ~loc_start ~loc_end message =
+  Lsp.Types.Diagnostic.create
+    ~message:(`String message)
+    ~range:
+      (Range.create
+         ~start:(Position.of_lexical_position loc_start |> Option.value_exn)
+         ~end_:(Position.of_lexical_position loc_end |> Option.value_exn))
+    ~source:"lsp/lrgrep"
+    ()
+;;
+
+let first_syntax_error ~path ~contents =
+  match Ocaml_lsp_lrgrep_shim.parse_file ~path (Lexing.from_string contents) with
+  | Ok () -> None
+  | Error { msg; loc = { loc_start; loc_end; loc_ghost = _ } } ->
+    Some (diagnostic_of_lrgrep ~loc_start ~loc_end msg)
+;;
+
+(** Get merlin diagnostics for a single file. *)
 let query_merlin_for_diagnostics ~log_info diagnostics merlin =
   let create_diagnostic ~message =
-    Diagnostic.create ~source:ocamllsp_source ~message:(`String message)
+    Diagnostic.create ~source:merlin_source ~message:(`String message)
   in
   let command = Query_protocol.Errors { lexing = true; parsing = true; typing = true } in
-  Document.Merlin.with_pipeline_exn ~log_info merlin (fun pipeline ->
+  Document.Merlin.with_pipeline_exn ~log_info ~priority merlin (fun pipeline ->
     match Query_commands.dispatch pipeline command with
     | exception Merlin_extend.Extend_main.Handshake.Error error ->
       let message =
@@ -370,10 +350,15 @@ let query_merlin_for_diagnostics ~log_info diagnostics merlin =
     | all_errors ->
       let merlin_diagnostics =
         match (Mpipeline.final_config pipeline).merlin.failures with
+        | _ :: _ as config_failures ->
+          (* Always return configuration errors -- if the user requested syntax or typing
+             errors, they'll probably need to fix their configuration to get them. *)
+          List.map config_failures ~f:(fun failure ->
+            create_diagnostic ~range:Range.first_line ~message:failure ())
         | [] ->
           let syntax_diagnostics, typer_diagnostics =
             Base.List.partition_map all_errors ~f:(fun (error : Loc.error) ->
-              let diagnostic = default_error_to_diagnostic ~diagnostics ~merlin ~error in
+              let diagnostic = merlin_report_to_diagnostic ~diagnostics ~merlin ~error in
               match error.source with
               | Lexer | Parser -> First diagnostic
               | _ -> Second diagnostic)
@@ -390,16 +375,23 @@ let query_merlin_for_diagnostics ~log_info diagnostics merlin =
                  let message =
                    "This typed hole should be replaced with an expression of type " ^ typ
                  in
-                 (* we set specific diagnostic code = "hole" to be able to filter
-                    through diagnostics easily *)
+                 (* we set specific diagnostic code = "hole" to be able to filter through
+                    diagnostics easily *)
                  create_diagnostic ~code:(`String "hole") ~range ~message ~severity ())
              in
              (* Can we use [List.merge] instead? *)
-             List.rev_append holes_as_err_diags typer_diagnostics
-           | _ -> syntax_diagnostics)
-        | config_failures ->
-          List.map config_failures ~f:(fun failure ->
-            create_diagnostic ~range:Range.first_line ~message:failure ())
+             if diagnostics.which_diagnostics.merlin_typing
+             then List.rev_append holes_as_err_diags typer_diagnostics
+             else []
+           | _ ->
+             (match diagnostics.which_diagnostics.merlin_syntax with
+              | false -> []
+              | true ->
+                (* Use lrgrep to get a (hopefully) better syntax error message. *)
+                let doc = Document.Merlin.to_doc merlin in
+                let path = Document.uri doc |> Uri.to_path in
+                let contents = Document.text doc in
+                first_syntax_error ~path ~contents |> Option.to_list))
       in
       List.sort
         merlin_diagnostics
@@ -407,33 +399,32 @@ let query_merlin_for_diagnostics ~log_info diagnostics merlin =
           Range.compare d1.range d2.range))
 ;;
 
-let merlin_diagnostics ~log_info diagnostics merlin =
-  let open Fiber.O in
-  let doc = Document.Merlin.to_doc merlin in
-  let uri = Document.uri doc in
-  let+ diagnostics_to_display =
-    match diagnostics.display_merlin_diagnostics with
-    | true -> query_merlin_for_diagnostics ~log_info diagnostics merlin
-    | false -> Fiber.return []
-  in
-  set diagnostics (`Merlin (uri, diagnostics_to_display))
+let merlin_diagnostics_for_file ~log_info diagnostics merlin =
+  (* Avoid calling merlin if we're not going to display any diagnostics. This has the
+     added benefit of avoiding a merlin short-paths bug triggered by the
+     [e2e-new/semantic_hl_data.ml] tests. *)
+  if diagnostics.which_diagnostics.merlin_typing
+     || diagnostics.which_diagnostics.merlin_syntax
+  then query_merlin_for_diagnostics ~log_info diagnostics merlin
+  else Fiber.return []
 ;;
 
-let has_cached_errors diagnostics merlin =
-  let cached_diagnostics =
-    Document.Merlin.to_doc merlin |> Document.uri |> Table.find diagnostics.merlin
-  in
-  match cached_diagnostics with
-  | None | Some [] -> false
-  | _ -> true
-;;
-
-let set_display_merlin_diagnostics t ~display_merlin_diagnostics =
-  t.display_merlin_diagnostics <- display_merlin_diagnostics
-;;
+let updated_dune_uris t = t.updated_dune_uris
+let clear_updated_dune_uris t = t.updated_dune_uris <- []
+let set_which_diagnostics t ~which_diagnostics = t.which_diagnostics <- which_diagnostics
 
 let set_shorten_merlin_diagnostics t ~shorten_merlin_diagnostics =
-  (* The ocaml-lsp ChangeConfiguration command handles re-sending diagnostics on configuration
-     changes *)
+  (* The ocaml-lsp ChangeConfiguration command handles re-sending diagnostics on
+     configuration changes *)
   t.shorten_merlin_diagnostics <- shorten_merlin_diagnostics
 ;;
+
+let of_diagnostic_parser t (dp : Diagnostic_parser.Diagnostic.t) =
+  let tags = tags_of_message t ~src:`Dune dp.message in
+  Diagnostic.of_diagnostic_parser ?tags ~source:dune_source dp
+;;
+
+module For_testing = struct
+  let remove_errno = remove_errno
+  let equal_message = equal_message
+end

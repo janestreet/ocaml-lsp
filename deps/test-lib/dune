@@ -1,0 +1,10 @@
+(rule
+ (target ocaml_lsp_test_lib.ml)
+ (deps ocaml_lsp_test_lib.oss-specific.ml)
+ (action
+  (copy %{dep:ocaml_lsp_test_lib.oss-specific.ml} %{target})))
+
+(library
+ (name ocaml_lsp_test_lib)
+ (modules ocaml_lsp_test_lib)
+ (libraries core expect_test_helpers_core))

@@ -1,8 +1,9 @@
-open Stdune
+module Fiber = Ocaml_lsp_fiber
 open Jsonrpc
 open Jsonrpc_fiber
 open Fiber.O
 open Fiber.Stream
+module List = Base.List
 
 module Stream_chan = struct
   type t = Jsonrpc.Packet.t In.t * Jsonrpc.Packet.t Out.t
@@ -40,13 +41,16 @@ let%expect_test "start and stop server" =
     let run = Jrpc.run jrpc in
     Fiber.fork_and_join_unit (fun () -> run) (fun () -> Jrpc.stop jrpc)
   in
-  let () = Fiber_test.test Dyn.opaque run in
+  let () = Fiber_test.test (fun _ -> Base.Sexp.Atom "<opaque>") run in
   [%expect {| <opaque> |}]
 ;;
 
 let%expect_test "server accepts notifications" =
   let notif =
-    { Jsonrpc.Notification.method_ = "method"; params = Some (`List [ `String "bar" ]) }
+    { Jsonrpc.Notification.method_ = "method"
+    ; params = Some (`List [ `String "bar" ])
+    ; event_index = None
+    }
   in
   let run () =
     let in_ = In.of_list [ Jsonrpc.Packet.Notification notif ] in
@@ -60,7 +64,7 @@ let%expect_test "server accepts notifications" =
     let jrpc = Jrpc.create ~name:"test" ~on_notification (in_, no_output ()) () in
     Jrpc.run jrpc
   in
-  Fiber_test.test Dyn.opaque run;
+  Fiber_test.test (fun _ -> Base.Sexp.Atom "<opaque>") run;
   [%expect
     {|
     received notification
@@ -79,7 +83,12 @@ let of_ref ref =
 let%expect_test "serving requests" =
   let id = `Int 1 in
   let request =
-    { Jsonrpc.Request.id; method_ = "bla"; params = Some (`List [ `Int 100 ]) }
+    { Jsonrpc.Request.id
+    ; method_ = "bla"
+    ; params = Some (`List [ `Int 100 ])
+    ; request_time = None
+    ; event_index = None
+    }
   in
   let response_data = `String "response" in
   let run () =
@@ -99,7 +108,7 @@ let%expect_test "serving requests" =
       let json = Jsonrpc.Packet.yojson_of_t resp in
       print_endline (Yojson.Safe.pretty_to_string ~std:false json))
   in
-  Fiber_test.test Dyn.opaque run;
+  Fiber_test.test (fun _ -> Base.Sexp.Atom "<opaque>") run;
   [%expect
     {|
     { "id": 1, "jsonrpc": "2.0", "result": "response" }
@@ -107,8 +116,8 @@ let%expect_test "serving requests" =
     |}]
 ;;
 
-(* The current client/server implement has no concurrent handling of requests.
-   We can show this when we try to send a request when handling a response. *)
+(* The current client/server implement has no concurrent handling of requests. We can show
+   this when we try to send a request when handling a response. *)
 let%expect_test "concurrent requests" =
   let print packet =
     print_endline
@@ -175,7 +184,7 @@ let%expect_test "concurrent requests" =
     in
     Fiber.all_concurrently_unit [ Jrpc.run waitee; initial_request (); Jrpc.run waiter ]
   in
-  Fiber_test.test Dyn.opaque run;
+  Fiber_test.test (fun _ -> Base.Sexp.Atom "<opaque>") run;
   [%expect
     {|
     initial: waitee requests from waiter
@@ -214,7 +223,7 @@ let%expect_test "test from jsonrpc_test.ml" =
     let json = Notification.yojson_of_t n in
     print_endline ">> received notification";
     print_json json;
-    Fiber.return (Jsonrpc_fiber.Notify.Continue, ())
+    Fiber.return (Jsonrpc_fiber.Notify.Continue None, ())
   in
   let responses = ref [] in
   let initial_requests =
@@ -243,8 +252,9 @@ let%expect_test "test from jsonrpc_test.ml" =
     in
     Out.write reqs_out None
   in
-  Fiber_test.test Dyn.opaque (fun () ->
-    Fiber.fork_and_join_unit write_reqs (fun () -> Jrpc.run session));
+  Fiber_test.test
+    (fun _ -> Base.Sexp.Atom "<opaque>")
+    (fun () -> Fiber.fork_and_join_unit write_reqs (fun () -> Jrpc.run session));
   List.rev !responses
   |> List.iter ~f:(fun packet ->
     let json = Jsonrpc.Packet.yojson_of_t packet in
@@ -258,7 +268,7 @@ let%expect_test "test from jsonrpc_test.ml" =
     Uncaught error when handling notification:
     { "method": "raise", "jsonrpc": "2.0" }
     Error:
-    [ { exn = "Failure(\"special failure\")"; backtrace = "" } ]
+    (((exn(Failure"special failure"))(backtrace())))
     <opaque>
     { "id": 10, "jsonrpc": "2.0", "result": 1 }
     { "id": "testing", "jsonrpc": "2.0", "result": 2 }
@@ -329,7 +339,7 @@ let%expect_test "cancellation" =
       ; Jrpc.stopped server
       ]
   in
-  Fiber_test.test Dyn.opaque run;
+  Fiber_test.test (fun _ -> Base.Sexp.Atom "<opaque>") run;
   [%expect
     {|
     client: waiting for server ack before cancelling request

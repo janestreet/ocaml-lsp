@@ -1,0 +1,3 @@
+(library
+ (name ocaml_lsp_fiber)
+ (libraries ocaml_lsp_stdune dyn))

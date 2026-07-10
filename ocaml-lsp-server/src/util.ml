@@ -36,27 +36,32 @@ let language_id_of_fname s =
   | ".rei" | ".re" -> "reason"
   | ".mll" -> "ocaml.ocamllex"
   | ".mly" -> "ocaml.menhir"
-  | ext -> Code_error.raise "unsupported file extension" [ "extension", String ext ]
+  | ext -> Code_error.raise_s [%message "unsupported file extension" ~ext]
 ;;
 
 let open_document_from_file (state : State.t) uri =
   let open Fiber.O in
   let filename = Uri.to_path uri in
   Fiber.of_thunk (fun () ->
-    let text = Io.String_path.read_file filename in
-    let languageId = language_id_of_fname filename in
-    let text_document = TextDocumentItem.create ~uri ~languageId ~version:0 ~text in
-    let params = DidOpenTextDocumentParams.create ~textDocument:text_document in
-    let+ doc =
-      let position_encoding = State.position_encoding state in
-      Document.make
-        ~position_encoding
-        (State.wheel state)
-        state.merlin_config
-        state.merlin
-        params
-    in
-    Some doc)
+    match Core.Or_error.try_with (fun () -> Core.In_channel.read_all filename) with
+    | Error _ ->
+      Log.log ~section:"debug" (fun () ->
+        Log.msg "Unable to open file" [ "filename", `String filename ]);
+      Fiber.return None
+    | Ok text ->
+      let languageId = language_id_of_fname filename in
+      let text_document = TextDocumentItem.create ~uri ~languageId ~version:0 ~text in
+      let params = DidOpenTextDocumentParams.create ~textDocument:text_document in
+      let+ doc =
+        let position_encoding = State.position_encoding state in
+        Document.make
+          ~position_encoding
+          (State.wheel state)
+          state.merlin_config
+          state.merlin
+          params
+      in
+      Some doc)
 ;;
 
 let is_at_cursor position =
@@ -75,4 +80,21 @@ let is_at_cursor position =
     at_or_after_start && before_or_at_end
   in
   is_at_cursor
+;;
+
+let get_doc_id ~(params : Jsonrpc.Structured.t option) =
+  match params with
+  | Some (`Assoc params) ->
+    List.Assoc.find ~equal:String.equal params "textDocument"
+    |> Option.map ~f:TextDocumentIdentifier.t_of_yojson
+  | Some (`List [ json_uri ]) -> Some (TextDocumentIdentifier.t_of_yojson json_uri)
+  | _ -> None
+;;
+
+let get_pos ~(params : Jsonrpc.Structured.t option) =
+  match params with
+  | Some (`Assoc params) ->
+    List.Assoc.find ~equal:String.equal params "position"
+    |> Option.map ~f:Position.t_of_yojson
+  | _ -> None
 ;;

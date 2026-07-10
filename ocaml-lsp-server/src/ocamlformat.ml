@@ -15,7 +15,7 @@ let run_command cancel prog stdin_value args =
     let pid =
       let argv = prog :: args in
       Spawn.spawn ~prog ~argv ~stdin:stdin_i ~stdout:stdout_o ~stderr:stderr_o ()
-      |> Stdune.Pid.of_int
+      |> Pid.of_int
     in
     Unix.close stdin_i;
     Unix.close stdout_o;
@@ -119,7 +119,7 @@ let binary_name t =
 
 let binary t =
   let name = binary_name t in
-  match Bin.which name with
+  match Ocaml_lsp_stdune.Bin.which name with
   | None -> Result.Error (Missing_binary { binary = name })
   | Some b -> Ok b
 ;;
@@ -133,11 +133,11 @@ let formatter doc =
       (Reason
          (match Document.kind doc with
           | `Merlin m -> Document.Merlin.kind m
-          | `Other -> Code_error.raise "unable to format non merlin document" []))
+          | `Other -> Code_error.raise_s [%message "unable to format non merlin document"]))
 ;;
 
-let exec cancel bin args stdin =
-  let refmt = Fpath.to_string bin in
+let exec cancel (bin : File_path.t) args stdin =
+  let refmt = File_path.to_string bin in
   let+ res, cancel = run_command cancel refmt stdin args in
   match cancel with
   | Cancelled () ->
@@ -154,7 +154,7 @@ let run doc cancel : (TextEdit.t list, error) result Fiber.t =
     let open Result.O in
     let* formatter = formatter doc in
     let args = args formatter in
-    let+ binary = binary formatter in
+    let+ (binary : File_path.t) = binary formatter in
     binary, args, Document.source doc |> Msource.text
   in
   match res with

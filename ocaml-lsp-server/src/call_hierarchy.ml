@@ -1,5 +1,7 @@
 open Import
 
+let priority = Priorities.call_hierarchy
+
 module Fiber_option = struct
   let bind t ~f =
     Fiber.bind t ~f:(function
@@ -27,8 +29,6 @@ let module_path_iter module_path_ref is_at_cursor =
 ;;
 
 let find_parent_function_of ~position parsetree =
-  (* TODO: This is not finding top level definitions that deconstruct values like
-     [let { foo } = some_fn ();], or [let () = command ... ;;] and more. *)
   let is_at_cursor = Util.is_at_cursor position in
   let last_fn = ref None in
   let module_path = ref [] in
@@ -36,11 +36,11 @@ let find_parent_function_of ~position parsetree =
     if is_at_cursor vb.pvb_expr.pexp_loc
     then (
       (match vb.pvb_pat.ppat_desc, vb.pvb_expr.pexp_desc with
-       (* E.g. [let foo a = a + 1], [let foo = fun a -> a + 1]*)
+       (* E.g. [let foo a = a + 1], [let foo = fun a -> a + 1] *)
        | Ppat_var fn_name, Pexp_function _
        (* E.g. [let foo a : int = a + 1] *)
        | Ppat_constraint ({ ppat_desc = Ppat_var fn_name; _ }, _, _), Pexp_function _
-       (* E.g. [let foo : type t. t -> int = fun x -> x + 1]*)
+       (* E.g. [let foo : type t. t -> int = fun x -> x + 1] *)
        | ( Ppat_constraint ({ ppat_desc = Ppat_var fn_name; _ }, _, _)
          , Pexp_newtype
              ( _
@@ -49,10 +49,8 @@ let find_parent_function_of ~position parsetree =
                ; _
                } ) ) -> last_fn := Some fn_name
        (* The following are only relevant for when [last_fn] is [None] this allows top
-          level call resolving e.g. [let () = main () ;;]*)
+          level call resolving e.g. [let () = main () ;;] *)
        | Ppat_var name, _ when Option.is_none !last_fn -> last_fn := Some name
-       (* TODO: Add cases for deconstructed tuples, records, array and other top level
-          value bindings. *)
        | _ -> ());
       Ast_iterator.default_iterator.value_binding self vb)
   in
@@ -139,7 +137,7 @@ let get_merlin_doc (state : State.t) uri =
 ;;
 
 let get_parsetree merlin_doc ~log_info =
-  Document.Merlin.with_pipeline_exn ~log_info merlin_doc (fun pipeline ->
+  Document.Merlin.with_pipeline_exn ~log_info ~priority merlin_doc (fun pipeline ->
     Mpipeline.reader_parsetree pipeline)
 ;;
 
@@ -159,7 +157,7 @@ let handle_prepare ~log_info (server : State.t Server.t) params =
          function. Then we also don't want to to call hierachy, so fine to bind here. *)
       let%bind.Fiber_option (`Location locs) =
         Option.value_map position ~default:(Fiber.return None) ~f:(fun position ->
-          Definition_query.run ~log_info `Definition state uri position)
+          Definition_query.run ~log_info ~priority Definition server uri position)
       in
       (* Definition should only return exactly one location. *)
       let%bind.Fiber_option { range = { start; _ }; uri } =
@@ -171,7 +169,10 @@ let handle_prepare ~log_info (server : State.t Server.t) params =
     | Not_a_function_or_identifier, _ -> Fiber.return None
     | Maybe_fn_call_or_reference rhs, _ -> resolve_definition rhs
     | Maybe_fn_alias (lhs, rhs), module_path ->
-      Core.Set_once.set_if_none first_alias (uri, lhs, module_path);
+      Ocaml_lsp_misc_shims.set_once_set_if_none
+        first_alias
+        ~here:[%here]
+        (uri, lhs, module_path);
       resolve_definition rhs
     | Fn_definition id, module_path ->
       let item =
@@ -210,6 +211,7 @@ let handle_incoming ~log_info (server : State.t Server.t) params =
   let* occurrences, _synced =
     Document.Merlin.dispatch_exn
       ~log_info
+      ~priority
       merlin_doc
       (Occurrences (`Ident_at (Position.logical range.end_), `Project))
   in

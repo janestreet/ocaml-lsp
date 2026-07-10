@@ -6,7 +6,7 @@ type t =
       [ `Batchable of
         Mpipeline.t -> Document.t -> CodeActionParams.t -> CodeAction.t option
       | `Non_batchable of
-        log_info:Lsp_timing_logger.t
+        log_info:Log_info.t
         -> Document.t
         -> CodeActionParams.t
         -> CodeAction.t option Fiber.t
@@ -23,7 +23,7 @@ val batchable
 
 val non_batchable
   :  CodeActionKind.t
-  -> (log_info:Lsp_timing_logger.t
+  -> (log_info:Log_info.t
       -> Document.t
       -> CodeActionParams.t
       -> CodeAction.t option Fiber.t)

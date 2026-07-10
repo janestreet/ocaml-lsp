@@ -1,3 +1,4 @@
+module Fiber = Ocaml_lsp_fiber
 open Test.Import
 
 val uri : Uri.t

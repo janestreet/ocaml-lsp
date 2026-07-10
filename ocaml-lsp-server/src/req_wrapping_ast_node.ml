@@ -1,25 +1,11 @@
 open Import
 open Fiber.O
 
+let priority = Priorities.wrapping_ast_node
 let capability = "handleWrappingAstNode", `Bool true
-let meth = "ocamllsp/wrappingAstNode"
-
-let get_doc_id ~(params : Jsonrpc.Structured.t option) =
-  match params with
-  | Some (`Assoc params) ->
-    List.assoc_opt "uri" params
-    |> Option.map ~f:(fun (param : Json.t) ->
-      let uri = DocumentUri.t_of_yojson param in
-      { TextDocumentIdentifier.uri })
-  | _ -> None
-;;
-
-let get_pos ~(params : Jsonrpc.Structured.t option) =
-  match params with
-  | Some (`Assoc params) ->
-    List.assoc_opt "position" params |> Option.map ~f:Position.t_of_yojson
-  | _ -> None
-;;
+let meth = Lsp.Client_request.Custom_request_names.wrapping_ast_node
+let get_doc_id = Util.get_doc_id
+let get_pos = Util.get_pos
 
 module Request_params = struct
   type t =
@@ -62,7 +48,7 @@ let on_request ~log_info ~params state =
     | `Merlin doc ->
       let pos = Position.logical cursor_position in
       let+ node =
-        Document.Merlin.with_pipeline_exn ~log_info doc (fun pipeline ->
+        Document.Merlin.with_pipeline_exn ~log_info ~priority doc (fun pipeline ->
           let typer = Mpipeline.typer_result pipeline in
           let pos = Mpipeline.get_lexing_pos pipeline pos in
           let enclosing_nodes (* from smallest node to largest *) =

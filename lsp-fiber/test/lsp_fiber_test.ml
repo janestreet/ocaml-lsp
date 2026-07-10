@@ -1,8 +1,10 @@
+module Fiber = Ocaml_lsp_fiber
 open Async
 open Fiber.O
 open Lsp
 open Lsp.Types
 open Lsp_fiber
+module Fiber_async = Ocaml_lsp_fiber_shims.Fiber_async
 
 module Test = struct
   module Client = struct
@@ -47,7 +49,7 @@ let test make_client make_server =
     let+ () = Fiber.fork_and_join_unit server client in
     print_endline "Successful termination of test"
   in
-  let%map () = Fiber_async.deferred_of_fiber fiber () in
+  let%map.Deferred () = Fiber_async.deferred_of_fiber fiber () in
   print_endline "[TEST] finished"
 ;;
 
@@ -59,7 +61,7 @@ module End_to_end_client = struct
       (Jsonrpc.Response.Error.make ~message:"not implemented" ~code:InternalError ())
   ;;
 
-  let on_notification (client : _ Client.t) n =
+  let on_notification (client : _ Client.t) n ~event_index:_ =
     let state = Client.state client in
     let received_notification = state in
     let req = Server_notification.to_jsonrpc n in
@@ -69,7 +71,7 @@ module End_to_end_client = struct
       (Jsonrpc.Notification.yojson_of_t req);
     let+ () = Fiber.Ivar.fill received_notification () in
     Format.eprintf "client: filled received_notification@.%!";
-    state
+    state, None
   ;;
 
   let run io =
@@ -115,7 +117,7 @@ module End_to_end_client = struct
         json_pp
         res_reply;
       Format.eprintf "client: sending request to shutdown@.%!";
-      let* () = Fiber.Pool.stop detached in
+      let* () = Ocaml_lsp_fiber_shims.close_fiber_pool detached in
       Client.notification client Exit
     in
     Fiber.fork_and_join_unit init (fun () ->
@@ -129,9 +131,18 @@ module End_to_end_server = struct
     | Initialized
 
   let on_request =
-    let on_request (type a) self (req : a Client_request.t) : (a Rpc.Reply.t * _) Fiber.t =
+    let on_request
+      (type a)
+      self
+      (req : a Client_request.t)
+      ~(request_time : Core.Time_ns.t option)
+      ~(event_index : int option)
+      : (a Rpc.Reply.t * _) Fiber.t
+      =
       let state = Server.state self in
       let _status, detached = state in
+      ignore request_time;
+      ignore event_index;
       match req with
       | Client_request.Initialize _ ->
         let capabilities = ServerCapabilities.create () in
@@ -154,7 +165,7 @@ module End_to_end_server = struct
               Server.notification self (Server_notification.ShowMessage msg))
           | _ -> Fiber.return ()
         in
-        let* () = Fiber.Pool.stop detached in
+        let* () = Ocaml_lsp_fiber_shims.close_fiber_pool detached in
         let result = `String "successful execution" in
         let* cancel = Rpc.Server.cancel_token () in
         (match command with
@@ -162,8 +173,7 @@ module End_to_end_server = struct
            let+ () = Lev_fiber.Timer.sleepf 0.2 in
            ( Rpc.Reply.later (fun k ->
                let* cancel = Rpc.Server.cancel_token () in
-               (* Make sure that we can access the cancel token in a Reply
-                  response *)
+               (* Make sure that we can access the cancel token in a Reply response *)
                assert (Option.is_some cancel);
                k result)
            , state )
@@ -178,10 +188,10 @@ module End_to_end_server = struct
     { Server.Handler.on_request }
   ;;
 
-  let on_notification self _ =
+  let on_notification self _ ~event_index:_ =
     let state = Server.state self in
     Format.eprintf "server: Received notification@.%!";
-    Fiber.return state
+    Fiber.return (state, None)
   ;;
 
   let run io =

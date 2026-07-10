@@ -26,7 +26,7 @@ val syntax : t -> Syntax.t
 module Single_pipeline : sig
   type t
 
-  val create : Lev_fiber.Thread.t -> t
+  val create : Priority_lsp_executor.t -> t
 end
 
 val make
@@ -49,36 +49,45 @@ module Merlin : sig
   val timer : t -> Lev_fiber.Timer.Wheel.task
 
   (** uses a single pipeline, provisioned by the configuration attached to the merlin
-      document (via {!type:t}). *)
+      document (via {!type:t}).
+
+      {b Warning}: using [Fiber] inside the pipeline cause assertions to fail in merlin. *)
   val with_pipeline_exn
-    :  log_info:Lsp_timing_logger.t
+    :  log_info:Log_info.t
+    -> priority:Priority.t
     -> t
     -> (Mpipeline.t -> 'a)
     -> 'a Fiber.t
 
   (** Like {!val:with_pipeline_exn} but where the merlin configuration is supplied
-      manually. If, for example, it is computed outside the execution of the pipeline. *)
+      manually. If, for example, it is computed outside the execution of the pipeline.
+
+      {b Warning}: using [Fiber] inside the pipeline cause assertions to fail in merlin. *)
   val with_configurable_pipeline_exn
-    :  log_info:Lsp_timing_logger.t
+    :  log_info:Log_info.t
     -> config:Mconfig.t
+    -> priority:Priority.t
     -> t
     -> (Mpipeline.t -> 'a)
     -> 'a Fiber.t
 
   val dispatch
-    :  log_info:Lsp_timing_logger.t
+    :  log_info:Log_info.t
+    -> priority:Priority.t
     -> t
     -> 'a Query_protocol.t
     -> ('a, Exn_with_backtrace.t) result Fiber.t
 
   val dispatch_exn
-    :  log_info:Lsp_timing_logger.t
+    :  log_info:Log_info.t
+    -> priority:Priority.t
     -> t
     -> 'a Query_protocol.t
     -> 'a Fiber.t
 
   val doc_comment
-    :  log_info:Lsp_timing_logger.t
+    :  log_info:Log_info.t
+    -> priority:Priority.t
     -> t
     -> Msource.position
     -> (* doc string *)
@@ -94,15 +103,18 @@ module Merlin : sig
     ; typ : string
     ; doc : string option
     ; stack_or_heap : string option
-    ; syntax_doc : Query_protocol.Syntax_doc_result.t option
+    ; kind : string option
+    ; mode : string option
+    ; syntax_doc : string option
     }
 
   val type_enclosing
-    :  log_info:Lsp_timing_logger.t
+    :  log_info:Log_info.t
     -> t
     -> Msource.position
     -> (* verbosity *) int
-    -> with_syntax_doc:bool
+    -> syntax_doc:string option
+    -> priority:Priority.t
     -> type_enclosing option Fiber.t
 
   val kind : t -> Kind.t
@@ -131,3 +143,9 @@ val edit : t -> TextEdit.t list -> WorkspaceEdit.t
 
     Returns [None] when there is no corresponding substring. *)
 val substring : t -> Range.t -> string option
+
+(** [get_source_text t loc] returns the substring of the document [t] that corresponds to
+    the location [loc].
+
+    Returns [None] when there is no corresponding substring. *)
+val get_source_text : t -> Loc.t -> string option

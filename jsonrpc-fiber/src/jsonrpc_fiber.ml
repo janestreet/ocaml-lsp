@@ -1,5 +1,6 @@
 open Import
 open Fiber.O
+module Fiber_extensions = Ocaml_lsp_fiber_shims
 
 module Id = struct
   include Id
@@ -7,9 +8,13 @@ module Id = struct
 end
 
 module Notify = struct
+  module Work = struct
+    type t = unit -> unit Fiber.t
+  end
+
   type t =
     | Stop
-    | Continue
+    | Continue of Work.t option
 end
 
 module Sender = struct
@@ -24,9 +29,9 @@ module Sender = struct
   let send t (r : Response.t) : unit Fiber.t =
     Fiber.of_thunk (fun () ->
       if t.called
-      then Code_error.raise "cannot send response twice" []
+      then Code_error.raise_s [%message "cannot send response twice"]
       else if not (Id.equal t.for_ r.id)
-      then Code_error.raise "invalid id" []
+      then Code_error.raise_s [%message "invalid id"]
       else t.called <- true;
       t.send r)
   ;;
@@ -99,7 +104,7 @@ struct
       match exn.exn with
       | Jsonrpc.Response.Error.E resp -> resp
       | _ ->
-        let data = exn |> Exn_with_backtrace.to_dyn |> Json.of_dyn in
+        let data = Exn_with_backtrace.sexp_of_t exn |> Json.of_sexp in
         Response.Error.make ~code:InternalError ~data ~message:"uncaught exception" ()
     in
     Response.error id error
@@ -116,7 +121,7 @@ struct
 
   let on_notification_fail ctx =
     let state = Context.state ctx in
-    Fiber.return (Notify.Continue, state)
+    Fiber.return (Notify.Continue None, state)
   ;;
 
   let stop_pending_requests t =
@@ -195,7 +200,7 @@ struct
          | Response r ->
            let* () = Fiber.Pool.task later ~f:(fun () -> on_response r) in
            loop ()
-         | Batch_call _ -> Code_error.raise "batch requests aren't supported" []
+         | Batch_call _ -> Code_error.raise_s [%message "batch requests aren't supported"]
          | Batch_response _ -> assert false)
     and on_response r =
       let log (what : string) =
@@ -216,8 +221,7 @@ struct
       log t (fun () -> Log.msg "handling request" []);
       let* result =
         let sent = ref false in
-        Fiber.map_reduce_errors
-          (module Stdune.Monoid.Unit)
+        Fiber_extensions.map_reduce_errors_first
           ~on_error:(fun exn_bt ->
             if !sent
             then (* TODO log *)
@@ -237,8 +241,7 @@ struct
         let* () =
           Fiber.Pool.task later ~f:(fun () ->
             let+ res =
-              Fiber.map_reduce_errors
-                (module Stdune.Monoid.Unit)
+              Fiber_extensions.map_reduce_errors_first
                 (fun () -> Reply.send reply sender)
                 ~on_error:(fun exn_bt ->
                   if sender.called
@@ -254,19 +257,24 @@ struct
         in
         loop ()
     and on_notification (r : Notification.t) : unit Fiber.t =
-      let* res = Fiber.collect_errors (fun () -> t.on_notification (t, r)) in
+      let* res =
+        Ocaml_lsp_fiber_shims.collect_errors (fun () -> t.on_notification (t, r))
+      in
       match res with
       | Ok (next, state) ->
         t.state <- state;
         (match next with
          | Stop -> Fiber.return ()
-         | Continue -> loop ())
+         | Continue None -> loop ()
+         | Continue (Some action) ->
+           let* () = Fiber.Pool.task later ~f:action in
+           loop ())
       | Error errors ->
         Format.eprintf
           "Uncaught error when handling notification:@.%a@.Error:@.%s@."
           Json.pp
           (Notification.yojson_of_t r)
-          (Dyn.to_string (Dyn.list Exn_with_backtrace.to_dyn errors));
+          (Sexp.to_string [%sexp (errors : Exn_with_backtrace.t Base.list)]);
         loop ()
     in
     Fiber.of_thunk (fun () ->
@@ -275,14 +283,14 @@ struct
         Fiber.fork_and_join_unit
           (fun () ->
             let* () = loop () in
-            Fiber.Pool.stop later)
+            Ocaml_lsp_fiber_shims.close_fiber_pool later)
           (fun () -> Fiber.Pool.run later)
       in
       close t)
   ;;
 
   let check_running t =
-    if not t.running then Code_error.raise "jsonrpc must be running" []
+    if not t.running then Code_error.raise_s [%message "jsonrpc must be running"]
   ;;
 
   let notification t (n : Notification.t) =
@@ -293,7 +301,7 @@ struct
 
   let register_request_ivar t id ivar =
     match Id.Table.find_opt t.pending id with
-    | Some _ -> Code_error.raise "duplicate request id" []
+    | Some _ -> Code_error.raise_s [%message "duplicate request id"]
     | None -> Id.Table.add t.pending ~key:id ~data:ivar
   ;;
 

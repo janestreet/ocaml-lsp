@@ -1,5 +1,8 @@
 open Import
 open Fiber.O
+module Format_doc = Ocaml_utils.Format_doc
+
+let priority = Priorities.inlay_hint
 
 let range_overlaps_loc range loc =
   match Range.of_loc_opt loc with
@@ -9,10 +12,8 @@ let range_overlaps_loc range loc =
 
 let outline_type ~env typ =
   Ocaml_typing.Printtyp.wrap_printing_env env (fun () ->
-    Format.asprintf "@[<h>: %a@]" Ocaml_typing.Printtyp.Compat.shared_type_scheme typ)
-  |> String.extract_words ~is_word_char:(function
-    | ' ' | '\t' | '\n' -> false
-    | _ -> true)
+    Format.asprintf "@[<h>: %a@]" Ocaml_typing.Printtyp.type_scheme typ)
+  |> String.split_on_chars ~on:[ ' '; '\t'; '\n' ]
   |> String.concat ~sep:" "
 ;;
 
@@ -25,8 +26,7 @@ let hint_binding_iter
   k
   =
   let module I = Ocaml_typing.Tast_iterator in
-  (* to be used for pattern variables in match cases, but not for function
-     arguments *)
+  (* to be used for pattern variables in match cases, but not for function arguments *)
   let case hint_lhs (iter : I.iterator) (case : _ Typedtree.case) =
     if hint_lhs then iter.pat iter case.c_lhs;
     Option.iter case.c_guard ~f:(iter.expr iter);
@@ -51,11 +51,11 @@ let hint_binding_iter
          | Tfunction_cases { fc_cases; _ } ->
            if hint_function_params
            then
-             List.iter params ~f:(fun (param : Typedtree.function_param) ->
+             List.iter params ~f:(fun param ->
                match param.fp_kind with
                | Tparam_pat pat -> iter.pat iter pat
                | Tparam_optional_default (pat, _, _) -> iter.pat iter pat);
-           List.iter fc_cases ~f:(fun { Typedtree.c_lhs; c_rhs; _ } ->
+           List.iter fc_cases ~f:(fun { c_lhs; c_rhs; _ } ->
              if hint_pattern_variables then iter.pat iter c_lhs;
              iter.expr iter c_rhs)
          | Tfunction_body body when not hint_function_params -> iter.expr iter body
@@ -64,7 +64,7 @@ let hint_binding_iter
         List.iter vbs ~f:(value_binding hint_let_bindings iter);
         iter.expr iter body
       | Texp_letop { body; _ } -> case hint_let_bindings iter body
-      | Texp_match (expr, _, cases, _) ->
+      | Texp_match (expr, _, cases, _, _) ->
         iter.expr iter expr;
         List.iter cases ~f:(case hint_pattern_variables iter)
       (* Stop iterating when we see a ghost location to avoid annotating generated code *)
@@ -112,14 +112,15 @@ let hint_binding_iter
 let let_syntax_at typer pos =
   let drop_library_name_if_in_scope
     (env : Env.t)
-    (decl : Types.module_declaration)
+    (decl : Ocaml_typing.Subst.Lazy.module_declaration)
     (path : Path.t)
     =
+    let loc txt = Loc.mknoloc txt in
     let rec to_lident (path : Path.t) : Longident.t =
       match path with
       | Pident ident -> Lident (Ident.name ident)
-      | Pdot (path, name) -> Ldot (to_lident path, name)
-      | Papply (lhs, rhs) -> Lapply (to_lident lhs, to_lident rhs)
+      | Pdot (path, name) -> Ldot (loc (to_lident path), loc name)
+      | Papply (lhs, rhs) -> Lapply (loc (to_lident lhs), loc (to_lident rhs))
       | Pextra_ty (path, _) -> to_lident path
     in
     let rec drop_libname (path : Path.t) : Longident.t option =
@@ -127,15 +128,17 @@ let let_syntax_at typer pos =
       | Pident _ -> None
       | Pdot (Pident _, name) -> Some (Lident name)
       | Pdot (path, name) ->
-        Option.map (drop_libname path) ~f:(fun ident -> Longident.Ldot (ident, name))
+        Option.map (drop_libname path) ~f:(fun ident ->
+          Longident.Ldot (loc ident, loc name))
       | Papply _ | Pextra_ty _ -> None
     in
     match drop_libname path with
     | Some ident ->
       (try
-         let let_syntax : Longident.t = Ldot (Ldot (ident, "Let_syntax"), "Let_syntax") in
+         let let_syntax : Longident.t =
+           Ldot (loc (Longident.Ldot (loc ident, loc "Let_syntax")), loc "Let_syntax")
+         in
          let _, decl' = Env.find_module_by_name_lazy let_syntax env in
-         let decl' = Ocaml_typing.Subst.Lazy.force_module_decl decl' in
          if Ocaml_typing.Shape.Uid.equal decl.md_uid decl'.md_uid
          then ident
          else to_lident path
@@ -146,7 +149,6 @@ let let_syntax_at typer pos =
   List.find_map (Mtyper.node_at typer pos) ~f:(fun (env, _) ->
     try
       let path, decl = Env.find_module_by_name_lazy (Lident "Let_syntax") env in
-      let decl = Ocaml_typing.Subst.Lazy.force_module_decl decl in
       match path with
       | Pdot (Pdot (path, "Let_syntax"), "Let_syntax") ->
         Some (drop_library_name_if_in_scope env decl path)
@@ -190,15 +192,12 @@ let hint_let_syntax_ppx_iter typer parsetree range create_inlay_hint =
   let structure (iter : Ast_iterator.iterator) (items : Parsetree.structure) =
     let prev_let_syntax = !current_let_syntax in
     let (_ : bool) =
-      List.fold_left
-        items
-        ~init:false
-        ~f:(fun should_push (item : Parsetree.structure_item) ->
-          if should_push then push_let_syntax item.pstr_loc.loc_start;
-          iter.structure_item iter item;
-          match item.pstr_desc with
-          | Pstr_open _ | Pstr_include _ -> true
-          | _ -> false)
+      List.fold_left items ~init:false ~f:(fun should_push item ->
+        if should_push then push_let_syntax item.pstr_loc.loc_start;
+        iter.structure_item iter item;
+        match item.pstr_desc with
+        | Pstr_open _ | Pstr_include _ -> true
+        | _ -> false)
     in
     current_let_syntax := prev_let_syntax
   in
@@ -256,7 +255,7 @@ let compute
         Option.map state.configuration.data.inlay_hints ~f:(fun c ->
           c.hint_let_syntax_ppx)
       in
-      Document.Merlin.with_pipeline_exn ~log_info doc (fun pipeline ->
+      Document.Merlin.with_pipeline_exn ~log_info ~priority doc (fun pipeline ->
         let hints = ref [] in
         (match Mtyper.get_typedtree (Mpipeline.typer_result pipeline) with
          | `Interface _ -> ()

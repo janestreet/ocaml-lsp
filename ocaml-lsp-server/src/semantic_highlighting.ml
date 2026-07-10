@@ -2,6 +2,8 @@ open Import
 open Fiber.O
 module Array_view = Lsp.Private.Array_view
 
+let priority = Priorities.semantic_highlighting
+
 (* TODO:
 
    - [x] support textDocument/semanticTokens/full
@@ -122,10 +124,10 @@ end = struct
   let array = lazy (Array.of_list list)
 
   let to_legend =
-    let cache = lazy (Hashtbl.create 3) in
+    let cache = lazy (Stdlib.Hashtbl.create 3) in
     fun t ->
       let cache = Lazy.force cache in
-      match Hashtbl.find_opt cache t with
+      match Stdlib.Hashtbl.find_opt cache t with
       | Some x -> x
       | None ->
         let rec translate t i acc : string list =
@@ -135,7 +137,7 @@ end = struct
           if Int.equal t' 0 then List.rev acc' else translate (i + 1) t' acc'
         in
         let res = translate t 0 [] in
-        Hashtbl.add cache t res;
+        Stdlib.Hashtbl.add cache t res;
         res
   ;;
 end
@@ -185,8 +187,8 @@ end = struct
     else (
       let range = Range.of_loc_opt loc in
       Option.iter range ~f:(fun ({ start; end_ } : Range.t) ->
-        (* TODO: we currently don't handle multi-line range; could handle if
-           client supports it - see client's capabilities on initialization *)
+        (* TODO: we currently don't handle multi-line range; could handle if client
+           supports it - see client's capabilities on initialization *)
         if Int.equal start.line end_.line
         then (
           let new_token : token =
@@ -355,9 +357,7 @@ end = struct
     (ca : Parsetree.constructor_arguments)
     =
     match ca with
-    | Pcstr_tuple l ->
-        List.iter l ~f:(fun (ca : Ocaml_parsing.Parsetree.constructor_argument) ->
-        self.typ self ca.pca_type)
+    | Pcstr_tuple l -> List.iter l ~f:(fun ca -> self.typ self ca.pca_type)
     | Pcstr_record l -> List.iter l ~f:(fun r -> self.label_declaration self r)
   ;;
 
@@ -389,14 +389,29 @@ end = struct
           add_token tp.loc (Token_type.of_builtin TypeParameter) Token_modifiers_set.empty);
         self.typ self ct;
         `Custom_iterator
+      | Ptyp_repr (tps, ct) ->
+        List.iter tps ~f:(fun (tp : _ Asttypes.loc) ->
+          add_token tp.loc (Token_type.of_builtin TypeParameter) Token_modifiers_set.empty);
+        self.typ self ct;
+        `Custom_iterator
+      | Ptyp_newlayout (vars, _) ->
+        List.iter vars ~f:(fun (var : _ Asttypes.loc) ->
+          add_token
+            var.loc
+            (Token_type.of_builtin TypeParameter)
+            Token_modifiers_set.empty);
+        self.typ self ct;
+        `Custom_iterator
       | Ptyp_any _ -> `Custom_iterator
       | Ptyp_variant (_, _, _)
       | Ptyp_alias (_, _, _)
       | Ptyp_arrow _ | Ptyp_extension _ | Ptyp_package _ | Ptyp_object _
-      | Ptyp_open (_, _) | Ptyp_of_kind _
-      | Ptyp_tuple _ | Ptyp_unboxed_tuple _
-      | Ptyp_repr (_, _)
-      | Ptyp_quote _ | Ptyp_splice _ -> `Default_iterator
+      | Ptyp_open (_, _)
+      | Ptyp_of_kind _
+      | Ptyp_tuple _
+      | Ptyp_unboxed_tuple _
+      | Ptyp_quote _
+      | Ptyp_splice _ -> `Default_iterator
     in
     match iter with
     | `Default_iterator -> Ast_iterator.default_iterator.typ self ct
@@ -517,7 +532,7 @@ end = struct
   ;;
 
   let const loc (constant : Parsetree.constant) =
-    match constant with
+    match constant.pconst_desc with
     | Parsetree.Pconst_integer _ | Pconst_float _
     | Pconst_unboxed_integer (_, _)
     | Pconst_unboxed_float (_, _) ->
@@ -527,21 +542,21 @@ end = struct
 
   let pexp_apply (self : Ast_iterator.iterator) (expr : Parsetree.expression) args =
     match expr.pexp_desc with
-    | Pexp_ident { txt = Ldot (Lident "Array", "set"); _ }
-    | Pexp_ident { txt = Ldot (Lident "Array", "get"); _ }
-    | Pexp_ident { txt = Ldot (Lident "String", "set"); _ }
-    | Pexp_ident { txt = Ldot (Lident "String", "get"); _ } ->
+    | Pexp_ident { txt = Ldot ({ txt = Lident "Array"; _ }, { txt = "set"; _ }); _ }
+    | Pexp_ident { txt = Ldot ({ txt = Lident "Array"; _ }, { txt = "get"; _ }); _ }
+    | Pexp_ident { txt = Ldot ({ txt = Lident "String"; _ }, { txt = "set"; _ }); _ }
+    | Pexp_ident { txt = Ldot ({ txt = Lident "String"; _ }, { txt = "get"; _ }); _ } ->
       List.iter args ~f:(fun ((_ : Asttypes.arg_label), e) -> self.expr self e);
       `Custom_iterator
     | Pexp_ident lid ->
       (match args with
        | (_, fst_arg) :: rest
-         when (* true if applied function is infix, i.e., function name occurs
-                 after the first argument *)
+         when (* true if applied function is infix, i.e., function name occurs after the
+                 first argument *)
               Loc.compare lid.loc fst_arg.pexp_loc > 0 ->
          self.expr self fst_arg;
-         (* [lident] parses the identifier to find module names, which we don't
-            need to do for infix operators. *)
+         (* [lident] parses the identifier to find module names, which we don't need to do
+            for infix operators. *)
          add_token lid.loc (Token_type.of_builtin Function) Token_modifiers_set.empty;
          List.iter rest ~f:(fun (_, e) -> self.expr self e)
        | _ ->
@@ -555,14 +570,13 @@ end = struct
     | _ -> `Default_iterator
   ;;
 
-  let ppx_string_extension ~string ~string_loc ~delimiter
-    : Parsetree.expression list =
+  let ppx_string_extension ~string ~string_loc ~delimiter : Parsetree.expression list =
     let parse_result =
       (* NOTE: This awkward dance is required as ppxlib's and ocamllsp's AST types
-          (including their locations!) are not type equal to each other. *)
+         (including their locations!) are not type equal to each other. *)
       let ({ loc_start; loc_end; loc_ghost } : Loc.t) = string_loc in
       Ppx_string.parse
-        ~config:(Ppx_string.config_for_string Local_input_heap_output)
+        ~config:Ocaml_lsp_misc_shims.ppx_string_config_for_string
         ~string_loc:{ loc_start; loc_end; loc_ghost }
         ~delimiter
         string
@@ -571,9 +585,9 @@ end = struct
     | false -> []
     | true ->
       (* We go through each interpolated part of the ppx, re-parse the contents using
-          merlin, correct the locations in the parsed AST using the location we get from
-          [Ppx_string], and then return the list of parsed expressions to be recursively
-          highlighted. *)
+         merlin, correct the locations in the parsed AST using the location we get from
+         [Ppx_string], and then return the list of parsed expressions to be recursively
+         highlighted. *)
       List.filter_map parse_result.parts ~f:(function
         | Ppx_string.Part.Literal _ -> None
         | Interpreted
@@ -618,7 +632,7 @@ end = struct
           in
           let mapper = { Ast_mapper.default_mapper with expr = map_offset } in
           (* We'll recursively semantic highlight the interpolated expression (without the
-              #Module annotation) *)
+             #Module annotation) *)
           let source =
             Msource.make (String.split interpreted_string ~on:'#' |> List.hd_exn)
           in
@@ -640,7 +654,7 @@ end = struct
                       | Pstr_eval (expr, _) ->
                         Some expr
                         (* A standalone expression is the only relevant kind node for the
-                            interpolated part of ppx_string *)
+                           interpolated part of ppx_string *)
                       | _ -> None)
                 in
                 Some exprs)))
@@ -660,8 +674,8 @@ end = struct
       | Pexp_construct (c, vo) ->
         (match c.txt with
          | Lident "::" ->
-           (* because [a; b] is desugared to [Pexp_construct (Lident "::",
-             Pexp_tuple(...))] *)
+           (* because [a; b] is desugared to
+              [Pexp_construct (Lident "::", Pexp_tuple(...))] *)
            Option.iter vo ~f:(fun v -> self.expr self v)
          | Lident "[]" -> () (* TDOO: is this correct? *)
          | Lident "()" -> ()
@@ -672,7 +686,7 @@ end = struct
       | Pexp_apply (expr, args) -> pexp_apply self expr args
       | Pexp_let (_, _, _, _) -> `Default_iterator
       | Pexp_function (params, constraint_, function_body) ->
-        List.iter params ~f:(fun (param : Ocaml_parsing.Parsetree.function_param) ->
+        List.iter params ~f:(fun param ->
           match param.pparam_desc with
           (* handles types like [type a] in [let f (type a) x y z = ...] *)
           | Pparam_newtype (t, _) ->
@@ -709,8 +723,8 @@ end = struct
       | Pexp_try (_, _)
       | Pexp_tuple _ | Pexp_unboxed_tuple _
       | Pexp_variant (_, _)
-      (* ^ label for a poly variant is missing location info -- we could have a
-         workaround by "parsing" this part of code ourselves*)
+      (* ^ label for a poly variant is missing location info -- we could have a workaround
+         by "parsing" this part of code ourselves *)
       | Pexp_match (_, _) -> `Default_iterator
       | Pexp_record (props, exp) | Pexp_record_unboxed_product (props, exp) ->
         Option.iter exp ~f:(fun e -> self.expr self e);
@@ -719,17 +733,16 @@ end = struct
           if Loc.compare lid.loc exp.pexp_loc <> 0 (* handles field punning *)
           then self.expr self exp);
         `Custom_iterator
-      | Pexp_idx (block_access, unboxed_accesses) ->
-        (match block_access with
-        | Baccess_field l -> lident l (Token_type.of_builtin Property) ()
-        | Baccess_array (_, _, e)
-        | Baccess_block (_, e) -> self.expr self e );
-        List.iter unboxed_accesses ~f:(fun (Parsetree.Uaccess_unboxed_field l) ->
-          lident l (Token_type.of_builtin Property) ());
-        `Custom_iterator
       | Pexp_field (e, l) | Pexp_unboxed_field (e, l) ->
         self.expr self e;
         lident l (Token_type.of_builtin Property) ();
+        `Custom_iterator
+      | Pexp_idx (block_access, unboxed_accesses) ->
+        (match block_access with
+         | Baccess_field l -> lident l (Token_type.of_builtin Property) ()
+         | Baccess_block (_, e) -> self.expr self e);
+        List.iter unboxed_accesses ~f:(fun (Uaccess_unboxed_field l) ->
+          lident l (Token_type.of_builtin Property) ());
         `Custom_iterator
       | Pexp_send (e, m) ->
         self.expr self e;
@@ -764,7 +777,7 @@ end = struct
         self.expr self e;
         Option.iter ct ~f:(self.typ self);
         `Custom_iterator
-      | Pexp_stack e ->
+      | Pexp_stack e | Pexp_borrow e ->
         self.expr self e;
         `Custom_iterator
       | Pexp_letop { let_; ands; body } ->
@@ -773,16 +786,25 @@ end = struct
           ~f:(fun { Parsetree.pbop_op = _; pbop_pat; pbop_exp; pbop_loc = _ } ->
             self.pat self pbop_pat;
             if Loc.compare pbop_pat.ppat_loc pbop_exp.pexp_loc
-               <> 0 (* handles punning as in e.g. [let* foo in <expr>]*)
+               <> 0 (* handles punning as in e.g. [let* foo in <expr>] *)
             then self.expr self pbop_exp);
         self.expr self body;
         `Custom_iterator
       | Pexp_extension
-          ( { txt = ("string" | "string.global"); loc = _ }
+          ( { txt =
+                ( "string"
+                | "string.global"
+                | "string.stack"
+                | "string.alloc"
+                | "string.alloc__stack" )
+            ; loc = _
+            }
           , PStr
               [ { pstr_desc =
                     Pstr_eval
-                      ( { pexp_desc = Pexp_constant (Pconst_string (string, _, delimiter))
+                      ( { pexp_desc =
+                            Pexp_constant
+                              { pconst_desc = Pconst_string (string, _, delimiter); _ }
                         ; pexp_loc = string_loc
                         ; _
                         }
@@ -809,8 +831,8 @@ end = struct
       | Pexp_open (_, _)
       | Pexp_extension _ | Pexp_comprehension _ | Pexp_hole
       | Pexp_overwrite (_, _)
-      | Pexp_unboxed_unit | Pexp_unboxed_bool _ | Pexp_borrow _
-      | Pexp_quote _ | Pexp_splice _ -> `Default_iterator
+      | Pexp_quote _ | Pexp_splice _ | Pexp_unboxed_bool _ | Pexp_unboxed_unit ->
+        `Default_iterator
     with
     | `Default_iterator -> Ast_iterator.default_iterator.expr self exp
     | `Custom_iterator -> self.attributes self pexp_attributes
@@ -879,11 +901,12 @@ end = struct
       | Ppat_extension _
       | Ppat_tuple _
       | Ppat_unboxed_tuple _
-      | Ppat_unboxed_unit
-      | Ppat_unboxed_bool _
       | Ppat_lazy _
       | Ppat_any
-      | Ppat_interval _ -> `Default_iterator
+      | Ppat_interval _
+      | Ppat_unboxed_bool _
+      | Ppat_unboxed_unit
+      | Ppat_effect _ -> `Default_iterator
     with
     | `Default_iterator -> Ast_iterator.default_iterator.pat self pat
     | `Custom_iterator -> self.attributes self ppat_attributes
@@ -922,8 +945,8 @@ end = struct
         `Custom_iterator
       | Pmod_extension _ -> `Custom_iterator
       | _ ->
-        (* We rely on the wildcard pattern to improve compatibility with
-           multiple OCaml's parsetree versions *)
+        (* We rely on the wildcard pattern to improve compatibility with multiple OCaml's
+           parsetree versions *)
         `Default_iterator
     with
     | `Custom_iterator -> self.attributes self pmod_attributes
@@ -952,23 +975,29 @@ end = struct
      } :
       Parsetree.value_description)
     =
+    let rec classify_type (ty : Ocaml_parsing.Parsetree.core_type) =
+      match ty.ptyp_desc with
+      | Ptyp_arrow (_, _, _, _, _) -> Token_type.of_builtin Function
+      | Ptyp_class (_, _) -> Token_type.of_builtin Class
+      | Ptyp_package _ -> Token_type.module_
+      | Ptyp_repr (_, ty) | Ptyp_poly (_, ty) | Ptyp_newlayout (_, ty) -> classify_type ty
+      | Ptyp_extension _
+      | Ptyp_constr (_, _)
+      | Ptyp_object (_, _)
+      | Ptyp_alias (_, _, _)
+      | Ptyp_variant (_, _, _)
+      | Ptyp_open (_, _)
+      | Ptyp_of_kind _
+      | Ptyp_tuple _
+      | Ptyp_unboxed_tuple _
+      | Ptyp_any _
+      | Ptyp_var _
+      | Ptyp_quote _
+      | Ptyp_splice _ -> Token_type.of_builtin Variable
+    in
     add_token
       pval_name.loc
-      (match pval_type.ptyp_desc with
-       | Ptyp_arrow (_, _, _, _, _) -> Token_type.of_builtin Function
-       | Ptyp_class (_, _) -> Token_type.of_builtin Class
-       | Ptyp_package _ -> Token_type.module_
-       | Ptyp_extension _
-       | Ptyp_constr (_, _)
-       | Ptyp_object (_, _)
-       | Ptyp_alias (_, _, _)
-       | Ptyp_variant (_, _, _)
-       | Ptyp_poly (_, _)
-       | Ptyp_open (_, _)
-       | Ptyp_of_kind _ | Ptyp_tuple _ | Ptyp_unboxed_tuple _ | Ptyp_any _ | Ptyp_var _
-       | Ptyp_repr (_, _)
-       | Ptyp_quote _ | Ptyp_splice _ ->
-         Token_type.of_builtin Variable)
+      (classify_type pval_type)
       (Token_modifiers_set.singleton Declaration);
     self.typ self pval_type;
     (* TODO: handle pval_prim ? *)
@@ -1061,7 +1090,7 @@ let gen_new_id =
 
 let compute_tokens ~log_info doc =
   let* parsetree, source =
-    Document.Merlin.with_pipeline_exn ~log_info doc (fun p ->
+    Document.Merlin.with_pipeline_exn ~log_info ~priority doc (fun p ->
       Mpipeline.reader_parsetree p, Mpipeline.input_source p)
   in
   let+ config = Document.Merlin.mconfig doc in
@@ -1082,18 +1111,11 @@ let compute_encoded_tokens ~log_info doc =
 (** Contains implementation of a custom request that provides human-readable tokens
     representation *)
 module Debug = struct
-  let meth_request_full = "ocamllsp/textDocument/semanticTokens/full"
-
-  let get_doc_id ~(params : Jsonrpc.Structured.t option) =
-    match params with
-    | Some (`Assoc _ as json) | Some (`List _ as json) ->
-      let params = SemanticTokensParams.t_of_yojson json in
-      Some params.textDocument
-    | None -> None
-  ;;
+  let meth_request_full = Lsp.Client_request.Custom_request_names.semantic_tokens_debug
+  let get_doc_id = Util.get_doc_id
 
   let on_request_full
-    :  log_info:Lsp_timing_logger.t -> params:Jsonrpc.Structured.t option -> State.t
+    :  log_info:Log_info.t -> params:Jsonrpc.Structured.t option -> State.t
     -> Json.t Fiber.t
     =
     fun ~log_info ~params state ->
@@ -1124,7 +1146,7 @@ module Debug = struct
 end
 
 let on_request_full
-  :  log_info:Lsp_timing_logger.t -> State.t -> SemanticTokensParams.t
+  :  log_info:Log_info.t -> State.t -> SemanticTokensParams.t
   -> SemanticTokens.t option Fiber.t
   =
   fun ~log_info state params ->
@@ -1143,9 +1165,9 @@ let on_request_full
 
 (* TODO: refactor [find_diff] and write (inline?) tests *)
 
-(* [find_diff] finds common prefix and common suffix and reports the rest as
-   array difference. This is not ideal but good enough. The idea comes from the
-   Rust Analyzer implementation of this function. *)
+(* [find_diff] finds common prefix and common suffix and reports the rest as array
+   difference. This is not ideal but good enough. The idea comes from the Rust Analyzer
+   implementation of this function. *)
 let find_diff ~(old : int array) ~(new_ : int array) : SemanticTokensEdit.t list =
   let old_len = Array.length old in
   let new_len = Array.length new_ in
@@ -1185,7 +1207,7 @@ let find_diff ~(old : int array) ~(new_ : int array) : SemanticTokensEdit.t list
 ;;
 
 let on_request_full_delta
-  :  log_info:Lsp_timing_logger.t -> State.t -> SemanticTokensDeltaParams.t
+  :  log_info:Log_info.t -> State.t -> SemanticTokensDeltaParams.t
   -> [ `SemanticTokens of SemanticTokens.t
      | `SemanticTokensDelta of SemanticTokensDelta.t
      ]

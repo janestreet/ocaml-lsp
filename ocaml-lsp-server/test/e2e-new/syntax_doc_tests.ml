@@ -1,3 +1,4 @@
+module Fiber = Ocaml_lsp_fiber
 open! Test.Import
 open Async
 
@@ -35,14 +36,21 @@ let hover_req client position =
 let run_test text req =
   let handler =
     Client.Handler.make
-      ~on_notification:(fun client _notification ->
+      ~on_notification:(fun client _notification ~event_index:_ ->
         Client.state client;
-        Fiber.return ())
+        Fiber.return ((), None))
       ()
   in
   Test.run ~handler (fun client ->
     let run_client () =
-      let capabilities = ClientCapabilities.create () in
+      let capabilities =
+        ClientCapabilities.create
+          ~textDocument:
+            (TextDocumentClientCapabilities.create
+               ~hover:(HoverClientCapabilities.create ~contentFormat:[ Markdown ] ())
+               ())
+          ()
+      in
       Client.start client (InitializeParams.create ~capabilities ())
     in
     let run () =
@@ -65,10 +73,10 @@ let run_test text req =
 let%expect_test "syntax doc should display" =
   let source =
     {ocaml|
-type color = Red|Blue
+let foo (type a : float64) (x : a) = 42
 |ocaml}
   in
-  let position = create_postion 1 9 in
+  let position = create_postion 1 19 in
   let req client =
     let* () = change_config client activate_syntax_doc in
     let* resp = hover_req client position in
@@ -81,12 +89,74 @@ type color = Red|Blue
     {|
     {
       "contents": {
-        "kind": "plaintext",
-        "value": "type color = Red | Blue\n***\n`syntax` Variant Type: Represent's data that may take on multiple different forms.. See [Manual](https://v2.ocaml.org/releases/4.14/htmlman/typedecl.html#ss:typedefs)"
+        "kind": "markdown",
+        "value": "```ocaml\nfloat64 mod external_\n```\n***\n`syntax` Kind abbreviation: The layout of types represented by a 64-bit machine float. See [Manual](https://oxcaml.org/documentation/unboxed-types/intro/)"
       },
       "range": {
-        "end": { "character": 21, "line": 1 },
-        "start": { "character": 0, "line": 1 }
+        "start": { "line": 1, "character": 18 },
+        "end": { "line": 1, "character": 25 }
+      }
+    }
+    |}]
+;;
+
+let%expect_test "kind hover should display" =
+  let source =
+    {ocaml|
+type t : immutable_data
+|ocaml}
+  in
+  let position = create_postion 1 11 in
+  let req client =
+    let* () = change_config client activate_syntax_doc in
+    let* resp = hover_req client position in
+    let () = print_hover resp in
+    Fiber.return ()
+  in
+  let (_ : string) = [%expect.output] in
+  let%map () = run_test source req in
+  [%expect
+    {|
+    {
+      "contents": {
+        "kind": "markdown",
+        "value": "```ocaml\nvalue non_float mod forkable unyielding many stateless immutable\n```\n***\n`syntax` Kind abbreviation: The kind of types that contain no mutable parts and no functions. See [Manual](https://oxcaml.org/documentation/kinds/syntax/)"
+      },
+      "range": {
+        "start": { "line": 1, "character": 9 },
+        "end": { "line": 1, "character": 23 }
+      }
+    }
+    |}]
+;;
+
+let%expect_test "kind hover shouldn't display" =
+  (* The cursor is on "portable", which isn't an alias, so only the syntax hover should
+     display. *)
+  let source =
+    {ocaml|
+type t : value mod portable
+|ocaml}
+  in
+  let position = create_postion 1 24 in
+  let req client =
+    let* () = change_config client activate_syntax_doc in
+    let* resp = hover_req client position in
+    let () = print_hover resp in
+    Fiber.return ()
+  in
+  let (_ : string) = [%expect.output] in
+  let%map () = run_test source req in
+  [%expect
+    {|
+    {
+      "contents": {
+        "kind": "markdown",
+        "value": "`syntax` Mod-bound: Values of types of this kind can cross to `portable` from weaker modes. See [Manual](https://oxcaml.org/documentation/kinds/intro/)"
+      },
+      "range": {
+        "start": { "line": 1, "character": 24 },
+        "end": { "line": 1, "character": 24 }
       }
     }
     |}]
@@ -109,10 +179,13 @@ type color = Red|Blue
   [%expect
     {|
     {
-      "contents": { "kind": "plaintext", "value": "type color = Red | Blue" },
+      "contents": {
+        "kind": "markdown",
+        "value": "```ocaml\ntype color = Red | Blue\n```"
+      },
       "range": {
-        "end": { "character": 21, "line": 1 },
-        "start": { "character": 0, "line": 1 }
+        "start": { "line": 1, "character": 0 },
+        "end": { "line": 1, "character": 21 }
       }
     }
     |}]
@@ -136,12 +209,12 @@ type t = ..
     {|
     {
       "contents": {
-        "kind": "plaintext",
-        "value": "type t = ..\n***\n`syntax` Extensible Variant Type: Can be extended with new variant constructors using `+=`.. See [Manual](https://v2.ocaml.org/releases/4.14/htmlman/extensiblevariants.html)"
+        "kind": "markdown",
+        "value": "```ocaml\ntype t = ..\n```\n***\n`syntax` Extensible Variant Type: Can be extended with new variant constructors using `+=`. See [Manual](https://ocaml.org/manual/5.2/extensiblevariants.html)"
       },
       "range": {
-        "end": { "character": 11, "line": 1 },
-        "start": { "character": 0, "line": 1 }
+        "start": { "line": 1, "character": 0 },
+        "end": { "line": 1, "character": 11 }
       }
     }
     |}]

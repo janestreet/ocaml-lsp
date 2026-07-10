@@ -1,3 +1,4 @@
+module Fiber = Ocaml_lsp_fiber
 open Async
 open Test.Import
 
@@ -13,7 +14,8 @@ val iter_code_actions
 val parse_selection : string -> string * Range.t
 
 val apply_code_action
-  :  ?diagnostics:Diagnostic.t list
+  :  ?path:string
+  -> ?diagnostics:Diagnostic.t list
   -> string
   -> string
   -> Range.t
@@ -21,4 +23,4 @@ val apply_code_action
 
 (** [code_action_test title source] runs the code action with title [title] and prints the
     resulting source. *)
-val code_action_test : title:string -> string -> unit Deferred.t
+val code_action_test : ?path:string -> title:string -> string -> unit Deferred.t

@@ -1,7 +1,5 @@
-open Stdune.Option.O
-
 let _TEST () : bool option =
-  let+ v = Sys.getenv_opt "OCAMLLSP_TEST" in
+  let%map.Core.Option v = Sys.getenv_opt "OCAMLLSP_TEST" in
   match v with
   | "true" -> true
   | "false" -> false
@@ -13,7 +11,7 @@ let _TEST () : bool option =
 ;;
 
 let _IS_HOVER_EXTENDED () : bool option =
-  let* v = Sys.getenv_opt "OCAMLLSP_HOVER_IS_EXTENDED" in
+  let%bind.Core.Option v = Sys.getenv_opt "OCAMLLSP_HOVER_IS_EXTENDED" in
   match v with
   | "true" | "1" -> Some true
   | _ -> Some false

@@ -1,3 +1,4 @@
+module Fiber = Ocaml_lsp_fiber
 open Async
 open Test.Import
 
@@ -25,7 +26,10 @@ let string = "Hello"
            ~settings:(`Assoc [ "codelens", `Assoc [ "enable", `Bool false ] ]))
     in
     let* resp_codelens_disabled = codelens client text_document in
-    print_endline ("CodeLens found: " ^ string_of_int (List.length resp_codelens_disabled));
+    (match resp_codelens_disabled with
+     | Some lenses ->
+       print_endline ("CodeLens found: " ^ string_of_int (List.length lenses))
+     | None -> print_endline "CodeLens response is null");
     Fiber.return ()
   in
   let%map.Deferred () = Helpers.test source req in
@@ -63,15 +67,18 @@ let foo_value : foo = Some 1
     {
       "contents": { "kind": "plaintext", "value": "foo" },
       "range": {
-        "end": { "character": 13, "line": 3 },
-        "start": { "character": 4, "line": 3 }
+        "start": { "line": 3, "character": 4 },
+        "end": { "line": 3, "character": 13 }
       }
     }
     {
-      "contents": { "kind": "plaintext", "value": "int option" },
+      "contents": {
+        "kind": "plaintext",
+        "value": "int option\n***\nKind: value non_float mod forkable unyielding many stateless immutable\n***\nMode: @ global portable uncontended read_write stateless unique many forkable unyielding static"
+      },
       "range": {
-        "end": { "character": 13, "line": 3 },
-        "start": { "character": 4, "line": 3 }
+        "start": { "line": 3, "character": 4 },
+        "end": { "line": 3, "character": 13 }
       }
     }
     |}]

@@ -1,0 +1,10 @@
+(rule
+ (target ocaml_lsp_misc_shims.ml)
+ (deps ocaml_lsp_misc_shims.oss-specific.ml)
+ (action
+  (copy %{dep:ocaml_lsp_misc_shims.oss-specific.ml} %{target})))
+
+(library
+ (name ocaml_lsp_misc_shims)
+ (modules ocaml_lsp_misc_shims)
+ (libraries base core ppx_string))

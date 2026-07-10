@@ -1,7 +1,7 @@
 open Import
 
 let capability = "handleSwitchImplIntf", `Bool true
-let meth = "ocamllsp/switchImplIntf"
+let meth = Lsp.Client_request.Custom_request_names.switch_impl_intf
 
 (** see the spec for [ocamllsp/switchImplIntf] *)
 let switch merlin_doc (param : DocumentUri.t) : Json.t =
@@ -9,13 +9,7 @@ let switch merlin_doc (param : DocumentUri.t) : Json.t =
   Json.yojson_of_list Uri.yojson_of_t files_to_switch_to
 ;;
 
-let get_doc_id ~(params : Jsonrpc.Structured.t option) =
-  match params with
-  | Some (`List [ json_uri ]) ->
-    let uri = DocumentUri.t_of_yojson json_uri in
-    Some { TextDocumentIdentifier.uri }
-  | _ -> None
-;;
+let get_doc_id = Util.get_doc_id
 
 let on_request ~(params : Jsonrpc.Structured.t option) (state : State.t) =
   match params with

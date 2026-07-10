@@ -38,6 +38,7 @@ val apply_text_document_edits : t -> TextEdit.t list -> t
     length of the document. [pos] is interpreted with [position_encoding t] *)
 val absolute_position : t -> Position.t -> int
 
-(* [absolute_range t range] same as [(absolute_position t range.start ,
-   absolute_position t range.end_)] but possibly faster *)
+(* [absolute_range t range] same as
+   [(absolute_position t range.start , absolute_position t range.end_)] but possibly
+   faster *)
 val absolute_range : t -> Range.t -> int * int

@@ -32,18 +32,26 @@ let of_lexical_position (lex_position : Lexing.position) : t option =
     Some { line; character })
 ;;
 
+let to_lexical_position (position : t) : Lexing.position =
+  { Lexing.dummy_pos with pos_lnum = position.line + 1; pos_cnum = position.character }
+;;
+
 let ( - ) ({ line; character } : t) (t : t) : t =
   { line = line - t.line; character = character - t.character }
 ;;
 
 let abs ({ line; character } : t) : t = { line = abs line; character = abs character }
 
-let compare ({ line; character } : t) (t : t) : Ordering.t =
-  Stdune.Tuple.T2.compare Int.compare Int.compare (line, character) (t.line, t.character)
+let compare ({ line; character } : t) (t : t) =
+  Core.Tuple.T2.compare
+    ~cmp1:Int.compare
+    ~cmp2:Int.compare
+    (line, character)
+    (t.line, t.character)
 ;;
 
 let compare_inclusion (t : t) (r : Lsp.Types.Range.t) =
-  match compare t r.start, compare t r.end_ with
+  match Ordering.of_int (compare t r.start), Ordering.of_int (compare t r.end_) with
   | Lt, Lt -> `Outside (abs (r.start - t))
   | Gt, Gt -> `Outside (abs (r.end_ - t))
   | Eq, Lt | Gt, Eq | Eq, Eq | Gt, Lt -> `Inside

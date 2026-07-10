@@ -2,12 +2,12 @@ open Import
 include Lsp.Types.Range
 
 let compare (x : t) (y : t) =
-  match Position.compare x.start y.start with
-  | (Lt | Gt) as r -> r
+  match Ordering.of_int (Position.compare x.start y.start) with
+  | (Lt | Gt) as r -> Ordering.to_int r
   | Ordering.Eq -> Position.compare x.end_ y.end_
 ;;
 
-let equal x y = Ordering.is_eq (compare x y)
+let equal x y = Int.equal (compare x y) 0
 
 let to_dyn { start; end_ } =
   Dyn.record [ "start", Position.to_dyn start; "end_", Position.to_dyn end_ ]
@@ -15,16 +15,23 @@ let to_dyn { start; end_ } =
 
 let contains (x : t) (y : t) =
   let open Ordering in
-  match Position.compare x.start y.start, Position.compare x.end_ y.end_ with
+  match
+    ( Ordering.of_int (Position.compare x.start y.start)
+    , Ordering.of_int (Position.compare x.end_ y.end_) )
+  with
   | (Lt | Eq), (Gt | Eq) -> true
   | _ -> false
 ;;
 
-(* Compares ranges by their lengths*)
+(* Compares ranges by their lengths *)
 let compare_size (x : t) (y : t) =
   let dx = Position.(x.end_ - x.start) in
   let dy = Position.(y.end_ - y.start) in
-  Tuple.T2.compare Int.compare Int.compare (dx.line, dy.line) (dx.character, dy.character)
+  Tuple.T2.compare
+    ~cmp1:Int.compare
+    ~cmp2:Int.compare
+    (dx.line, dy.line)
+    (dx.character, dy.character)
 ;;
 
 let first_line =
@@ -63,7 +70,10 @@ let resize_for_edit { TextEdit.range; newText } =
 
 let overlaps x y =
   let open Ordering in
-  match Position.compare x.start y.end_, Position.compare x.end_ y.start with
+  match
+    ( Ordering.of_int (Position.compare x.start y.end_)
+    , Ordering.of_int (Position.compare x.end_ y.start) )
+  with
   | (Lt | Eq), (Gt | Eq) | (Gt | Eq), (Lt | Eq) -> true
   | _ -> false
 ;;

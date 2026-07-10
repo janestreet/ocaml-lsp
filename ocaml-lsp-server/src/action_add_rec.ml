@@ -6,7 +6,7 @@ let action_title = "Add missing `rec` keyword"
 let let_bound_vars bindings =
   List.filter_map bindings ~f:(fun vb ->
     match vb.Typedtree.vb_pat.pat_desc with
-    | Typedtree.Tpat_var (id, loc, _, _, _) -> Some (id, loc)
+    | Typedtree.Tpat_var { id; name; _ } -> Some (id, name)
     | _ -> None)
 ;;
 
@@ -26,9 +26,9 @@ let has_missing_rec pipeline pos_start =
       let bound_vars = let_bound_vars bound in
       if List.exists bound_vars ~f:(fun (id, _) -> String.equal ident (Ident.name id))
       then
-        (* Return the location of the first pattern in the let binding (the
-           rec goes right before it) *)
-        let+ first_pat = List.hd_opt bound in
+        (* Return the location of the first pattern in the let binding (the rec goes right
+           before it) *)
+        let+ first_pat = List.hd bound in
         let first_pat_loc = first_pat.vb_pat.pat_loc in
         { first_pat_loc with loc_end = first_pat_loc.loc_start }
       else None

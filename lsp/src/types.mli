@@ -1,4 +1,5 @@
 open! Import
+module Diagnostic_parser = Ocaml_lsp_dune_integration.Diagnostic_parser
 
 module MarkedString : sig
   type t =
@@ -305,10 +306,12 @@ end
 
 module WatchKind : sig
   type t =
-    | Create
-    | Change
-    | Delete
-    | Other of string
+    { create : bool
+    ; change : bool
+    ; delete : bool
+    }
+
+  val create : ?create:bool -> ?change:bool -> ?delete:bool -> unit -> t
 
   include Json.Jsonable.S with type t := t
 end
@@ -468,23 +471,26 @@ module TextDocumentSaveReason : sig
 end
 
 module Position : sig
-  type t =
-    { character : int
-    ; line : int
+  type t = Diagnostic_parser.Diagnostic.Position.t =
+    { line : int
+    ; character : int
     }
 
   val create : character:int -> line:int -> t
+  val offset_of_position : string -> t -> int
 
   include Json.Jsonable.S with type t := t
 end
 
 module Range : sig
-  type t =
-    { end_ : Position.t
-    ; start : Position.t
+  type t = Diagnostic_parser.Diagnostic.Range.t =
+    { start : Position.t
+    ; end_ : Position.t
     }
+  [@@deriving compare, sexp_of]
 
   val create : end_:Position.t -> start:Position.t -> t
+  val contains : t -> position:Position.t -> bool
 
   include Json.Jsonable.S with type t := t
 end
@@ -615,6 +621,10 @@ module TextEdit : sig
     }
 
   val create : newText:string -> range:Range.t -> t
+
+  module For_testing : sig
+    val apply_edits : string -> t list -> string
+  end
 
   include Json.Jsonable.S with type t := t
 end
@@ -1837,6 +1847,7 @@ module Location : sig
     { range : Range.t
     ; uri : DocumentUri.t
     }
+  [@@deriving bin_io, compare, sexp_of]
 
   val create : range:Range.t -> uri:DocumentUri.t -> t
 
@@ -1897,6 +1908,12 @@ module Diagnostic : sig
     -> ?source:string
     -> ?tags:DiagnosticTag.t list
     -> unit
+    -> t
+
+  val of_diagnostic_parser
+    :  ?source:string
+    -> ?tags:DiagnosticTag.t list
+    -> Diagnostic_parser.Diagnostic.t
     -> t
 
   include Json.Jsonable.S with type t := t
@@ -3655,6 +3672,7 @@ module Hover : sig
         ]
     ; range : Range.t option
     }
+  [@@deriving bin_io]
 
   val create
     :  contents:
@@ -5684,4 +5702,39 @@ module Locations : sig
     ]
 
   include Json.Jsonable.S with type t := t
+
+  val first : t -> Location.t option
+end
+
+module DidHumanOpenParams : sig
+  type t = { textDocument : TextDocumentItem.t }
+
+  val create : textDocument:TextDocumentItem.t -> t
+
+  include Json.Jsonable.S with type t := t
+end
+
+module DidHumanCloseParams : sig
+  type t = { textDocument : TextDocumentIdentifier.t }
+
+  val create : textDocument:TextDocumentIdentifier.t -> t
+
+  include Json.Jsonable.S with type t := t
+end
+
+module Go_to_target : sig
+  (** Used to specify what type of go-to query is being sent to the remote lsp. *)
+  type t =
+    | Definition
+    (** Definition queries jump to a symbol's implementation in an ml file, such as
+        [let x ... =] or [module T = struct ... end] *)
+    | Declaration
+    (** Declaration queries jump to a symbol's interface in an mli, such as [val x : ...]
+        or [module T : sig ... end]. *)
+    | Type_definition
+    (** Type definition queries jump to the declaration of a symbol's type in an mli, such
+        as [type t = ...]. *)
+  [@@deriving bin_io, sexp]
+
+  val to_string : t -> string
 end

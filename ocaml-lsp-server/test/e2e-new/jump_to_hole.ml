@@ -11,7 +11,8 @@ let print_jump_to_hole (source : string) (position : Position.t) (direction : st
           ; "direction", `String direction
           ])
     in
-    Lsp.Client_request.UnknownRequest { meth = "ocamllsp/jumpToHole"; params }
+    Lsp.Client_request.UnknownRequest
+      { meth = Lsp.Client_request.Custom_request_names.typed_holes_jump; params }
   in
   Lsp_helpers.iter_lsp_response ~makeRequest ~source (fun x ->
     print_endline (Yojson.Safe.to_string x))
@@ -29,7 +30,7 @@ let rec zip_shortest (xs : 'a list) (ys : 'b list) : ('a * 'b) list =
   in
   let position = Position.create ~line:4 ~character:40 in
   let%map () = print_jump_to_hole source position "next" in
-  [%expect {| {"end":{"character":48,"line":4},"start":{"character":47,"line":4}} |}]
+  [%expect {| {"start":{"line":4,"character":47},"end":{"line":4,"character":48}} |}]
 ;;
 
 let%expect_test "can jump to prev hole" =
@@ -44,7 +45,7 @@ let rec zip_shortest (xs : 'a list) (ys : 'b list) : ('a * 'b) list =
   in
   let position = Position.create ~line:4 ~character:40 in
   let%map () = print_jump_to_hole source position "prev" in
-  [%expect {| {"end":{"character":28,"line":4},"start":{"character":27,"line":4}} |}]
+  [%expect {| {"start":{"line":4,"character":27},"end":{"line":4,"character":28}} |}]
 ;;
 
 let%expect_test "jump to next hole can wrap" =
@@ -59,7 +60,7 @@ let rec zip_shortest (xs : 'a list) (ys : 'b list) : ('a * 'b) list =
   in
   let position = Position.create ~line:5 ~character:1 in
   let%map () = print_jump_to_hole source position "next" in
-  [%expect {| {"end":{"character":43,"line":3},"start":{"character":42,"line":3}} |}]
+  [%expect {| {"start":{"line":3,"character":42},"end":{"line":3,"character":43}} |}]
 ;;
 
 let%expect_test "jump to prev hole can wrap" =
@@ -74,7 +75,7 @@ let rec zip_shortest (xs : 'a list) (ys : 'b list) : ('a * 'b) list =
   in
   let position = Position.create ~line:2 ~character:20 in
   let%map () = print_jump_to_hole source position "prev" in
-  [%expect {| {"end":{"character":50,"line":4},"start":{"character":49,"line":4}} |}]
+  [%expect {| {"start":{"line":4,"character":49},"end":{"line":4,"character":50}} |}]
 ;;
 
 let%expect_test "can jump to next hole when on char before current hole" =
@@ -89,7 +90,7 @@ let rec zip_shortest (xs : 'a list) (ys : 'b list) : ('a * 'b) list =
   in
   let position = Position.create ~line:4 ~character:27 in
   let%map () = print_jump_to_hole source position "next" in
-  [%expect {| {"end":{"character":48,"line":4},"start":{"character":47,"line":4}} |}]
+  [%expect {| {"start":{"line":4,"character":47},"end":{"line":4,"character":48}} |}]
 ;;
 
 let%expect_test "can jump to next hole when on char after current hole" =
@@ -104,7 +105,7 @@ let rec zip_shortest (xs : 'a list) (ys : 'b list) : ('a * 'b) list =
   in
   let position = Position.create ~line:4 ~character:28 in
   let%map () = print_jump_to_hole source position "next" in
-  [%expect {| {"end":{"character":48,"line":4},"start":{"character":47,"line":4}} |}]
+  [%expect {| {"start":{"line":4,"character":47},"end":{"line":4,"character":48}} |}]
 ;;
 
 let%expect_test "can jump to prev hole when on char before current hole" =
@@ -119,7 +120,7 @@ let rec zip_shortest (xs : 'a list) (ys : 'b list) : ('a * 'b) list =
   in
   let position = Position.create ~line:4 ~character:27 in
   let%map () = print_jump_to_hole source position "prev" in
-  [%expect {| {"end":{"character":25,"line":4},"start":{"character":24,"line":4}} |}]
+  [%expect {| {"start":{"line":4,"character":24},"end":{"line":4,"character":25}} |}]
 ;;
 
 let%expect_test "can jump to prev hole when on char after current hole" =
@@ -134,5 +135,5 @@ let rec zip_shortest (xs : 'a list) (ys : 'b list) : ('a * 'b) list =
   in
   let position = Position.create ~line:4 ~character:28 in
   let%map () = print_jump_to_hole source position "prev" in
-  [%expect {| {"end":{"character":25,"line":4},"start":{"character":24,"line":4}} |}]
+  [%expect {| {"start":{"line":4,"character":24},"end":{"line":4,"character":25}} |}]
 ;;

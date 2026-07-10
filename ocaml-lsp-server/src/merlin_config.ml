@@ -28,7 +28,7 @@
 open Import
 open Fiber.O
 module Std = Merlin_utils.Std
-module Misc = Merlin_utils.Misc
+module Misc = Ocaml_utils.Misc
 
 let dot_merlin = ref None
 
@@ -51,7 +51,7 @@ let create () path =
   | Some path -> { path; initial }
   | None ->
     let path =
-      let path = Uri.to_path path in
+      let path = Uri.drop_query path |> Uri.to_path in
       Misc.canonicalize_filename path
     in
     let initial =

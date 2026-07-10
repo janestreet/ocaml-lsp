@@ -16,3 +16,5 @@ val of_jsonrpc_params_exn
 
 val open_document_from_file : State.t -> DocumentUri.t -> Document.t option Fiber.t
 val is_at_cursor : Position.t -> Loc.t -> bool
+val get_doc_id : params:Jsonrpc.Structured.t option -> TextDocumentIdentifier.t option
+val get_pos : params:Jsonrpc.Structured.t option -> Position.t option

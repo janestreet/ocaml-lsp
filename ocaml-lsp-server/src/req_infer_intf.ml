@@ -2,15 +2,8 @@ open Import
 open Fiber.O
 
 let capability = "handleInferIntf", `Bool true
-let meth = "ocamllsp/inferIntf"
-
-let get_doc_id ~(params : Jsonrpc.Structured.t option) =
-  match params with
-  | Some (`List [ json_uri ]) ->
-    let uri = DocumentUri.t_of_yojson json_uri in
-    Some { TextDocumentIdentifier.uri }
-  | _ -> None
-;;
+let meth = Lsp.Client_request.Custom_request_names.infer_intf
+let get_doc_id = Util.get_doc_id
 
 let on_request ~log_info ~(params : Jsonrpc.Structured.t option) (state : State.t) =
   Fiber.of_thunk (fun () ->

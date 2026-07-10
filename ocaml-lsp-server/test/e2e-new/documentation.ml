@@ -1,3 +1,4 @@
+module Fiber = Ocaml_lsp_fiber
 open Async
 open Test.Import
 module Req = Ocaml_lsp_server.Custom_request.Get_documentation
@@ -51,10 +52,6 @@ let%expect_test "Documentation of simple type with contentFormat set to markdown
   [%expect {| { "doc": { "kind": "markdown", "value": "This is another comment" } } |}]
 ;;
 
-(* NOTE: the merlin documentation query appears to behave differently in some cases when
-   used internally. This may be because we have doc comments in different places than the
-   merlin documentation query expects. Since this does not represent any regression from
-   current behavior, I'm accepting the different test results to unblock this upgrade. *)
 let%expect_test "Documentation of simple type with an identifier and contentFormat" =
   let source =
     "{|type tree (** This is another comment *)\n  List.iter ~f:(fun x -> x*x) [2;4]|}"
@@ -126,7 +123,8 @@ let%expect_test "Documentation when List module is shadowed" =
   [%expect {| { "doc": { "kind": "plaintext", "value": "Base.List.iter" } } |}]
 ;;
 
-(* TODO: Open Issue in Merlin to investigate while this doesnt return documentation of the custom List module*)
+(* TODO: Open Issue in Merlin to investigate while this doesnt return documentation of the
+   custom List module *)
 let%expect_test "Documentation when List module is shadowed" =
   let source =
     "{|\n\

@@ -4,7 +4,7 @@ open Import
 
 (** Compute the folding range *)
 val compute
-  :  log_info:Lsp_timing_logger.t
+  :  log_info:Log_info.t
   -> State.t
   -> FoldingRangeParams.t
   -> FoldingRange.t list option Fiber.t

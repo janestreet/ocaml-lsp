@@ -1,6 +1,20 @@
 open Import
 open Types
 
+module CustomNotification = struct
+  type t =
+    | HumanDidOpen of DidHumanOpenParams.t
+    | HumanDidClose of DidHumanCloseParams.t
+  [@@deriving yojson]
+
+  let method_ = function
+    | HumanDidOpen _ -> "ocamllsp/humanDidOpen"
+    | HumanDidClose _ -> "ocamllsp/humanDidClose"
+  ;;
+
+  let capabilities = [ "handleDidHumanOpenAndClose", `Bool true ]
+end
+
 type t =
   | TextDocumentDidOpen of DidOpenTextDocumentParams.t
   | TextDocumentDidClose of DidCloseTextDocumentParams.t
@@ -23,6 +37,7 @@ type t =
   | NotebookDocumentDidChange of DidChangeNotebookDocumentParams.t
   | NotebookDocumentDidSave of DidSaveNotebookDocumentParams.t
   | NotebookDocumentDidClose of DidCloseNotebookDocumentParams.t
+  | CustomNotification of CustomNotification.t
   | UnknownNotification of Jsonrpc.Notification.t
 
 let method_ = function
@@ -47,6 +62,7 @@ let method_ = function
   | NotebookDocumentDidChange _ -> "notebookDocument/didChange"
   | NotebookDocumentDidSave _ -> "notebookDocument/didSave"
   | NotebookDocumentDidClose _ -> "notebookDocument/didClose"
+  | CustomNotification n -> CustomNotification.method_ n
   | UnknownNotification n -> n.method_
 ;;
 
@@ -79,6 +95,10 @@ let yojson_of_t = function
     Some (DidChangeNotebookDocumentParams.yojson_of_t params)
   | NotebookDocumentDidSave params ->
     Some (DidSaveNotebookDocumentParams.yojson_of_t params)
+  | CustomNotification (HumanDidOpen params) ->
+    Some (DidHumanOpenParams.yojson_of_t params)
+  | CustomNotification (HumanDidClose params) ->
+    Some (DidHumanCloseParams.yojson_of_t params)
   | UnknownNotification n -> (n.params :> Json.t option)
 ;;
 
@@ -146,6 +166,12 @@ let of_jsonrpc (r : Jsonrpc.Notification.t) =
       Json.message_params params DidChangeNotebookDocumentParams.t_of_yojson
     in
     NotebookDocumentDidChange params
+  | "ocamllsp/humanDidOpen" ->
+    let+ params = Json.message_params params DidHumanOpenParams.t_of_yojson in
+    CustomNotification (HumanDidOpen params)
+  | "ocamllsp/humanDidClose" ->
+    let+ params = Json.message_params params DidHumanCloseParams.t_of_yojson in
+    CustomNotification (HumanDidClose params)
   | m when m = Progress.method_ ->
     let+ params =
       Json.message_params params (ProgressParams.t_of_yojson Progress.t_of_yojson)
@@ -157,26 +183,25 @@ let of_jsonrpc (r : Jsonrpc.Notification.t) =
 let to_jsonrpc t =
   let method_ = method_ t in
   let params = yojson_of_t t |> Option.map Jsonrpc.Structured.t_of_yojson in
-  { Jsonrpc.Notification.params; method_ }
+  { Jsonrpc.Notification.params; method_; event_index = None }
 ;;
 
-let all_uris = function
-  | TextDocumentDidOpen t -> [ t.textDocument.uri ]
-  | TextDocumentDidClose t -> [ t.textDocument.uri ]
-  | TextDocumentDidChange t -> [ t.textDocument.uri ]
-  | DidSaveTextDocument t -> [ t.textDocument.uri ]
-  | WillSaveTextDocument t -> [ t.textDocument.uri ]
-  | DidChangeWatchedFiles t -> List.map ~f:(fun (c : FileEvent.t) -> c.uri) t.changes
-  | DidCreateFiles t ->
-    List.map ~f:(fun (f : FileCreate.t) -> f.uri |> Uri0.of_path) t.files
-  | DidDeleteFiles t ->
-    List.map ~f:(fun (f : FileDelete.t) -> f.uri |> Uri0.of_path) t.files
-  | DidRenameFiles t ->
-    List.map ~f:(fun (f : FileRename.t) -> f.newUri |> Uri0.of_path) t.files
-  | NotebookDocumentDidOpen t -> [ t.notebookDocument.uri ]
-  | NotebookDocumentDidChange t -> [ t.notebookDocument.uri ]
-  | NotebookDocumentDidSave t -> [ t.notebookDocument.uri ]
-  | NotebookDocumentDidClose t -> [ t.notebookDocument.uri ]
+let primary_uri = function
+  | TextDocumentDidOpen t -> Some t.textDocument.uri
+  | TextDocumentDidClose t -> Some t.textDocument.uri
+  | TextDocumentDidChange t -> Some t.textDocument.uri
+  | DidSaveTextDocument t -> Some t.textDocument.uri
+  | WillSaveTextDocument t -> Some t.textDocument.uri
+  | NotebookDocumentDidOpen t -> Some t.notebookDocument.uri
+  | NotebookDocumentDidChange t -> Some t.notebookDocument.uri
+  | NotebookDocumentDidSave t -> Some t.notebookDocument.uri
+  | NotebookDocumentDidClose t -> Some t.notebookDocument.uri
+  | CustomNotification (HumanDidOpen t) -> Some t.textDocument.uri
+  | CustomNotification (HumanDidClose t) -> Some t.textDocument.uri
+  | DidChangeWatchedFiles _
+  | DidCreateFiles _
+  | DidDeleteFiles _
+  | DidRenameFiles _
   | ChangeWorkspaceFolders _
   | ChangeConfiguration _
   | Initialized
@@ -185,5 +210,35 @@ let all_uris = function
   | WorkDoneProgressCancel _
   | SetTrace _
   | WorkDoneProgress _
-  | UnknownNotification _ -> []
+  | UnknownNotification _ -> None
+;;
+
+let other_uris = function
+  | DidChangeWatchedFiles t ->
+    Some (List.map ~f:(fun (c : FileEvent.t) -> c.uri) t.changes)
+  | DidCreateFiles t ->
+    Some (List.map ~f:(fun (f : FileCreate.t) -> f.uri |> Uri0.of_path) t.files)
+  | DidDeleteFiles t ->
+    Some (List.map ~f:(fun (f : FileDelete.t) -> f.uri |> Uri0.of_path) t.files)
+  | DidRenameFiles t ->
+    Some (List.map ~f:(fun (f : FileRename.t) -> f.newUri |> Uri0.of_path) t.files)
+  | TextDocumentDidOpen _
+  | TextDocumentDidClose _
+  | TextDocumentDidChange _
+  | DidSaveTextDocument _
+  | WillSaveTextDocument _
+  | NotebookDocumentDidOpen _
+  | NotebookDocumentDidChange _
+  | NotebookDocumentDidSave _
+  | NotebookDocumentDidClose _
+  | ChangeWorkspaceFolders _
+  | ChangeConfiguration _
+  | Initialized
+  | Exit
+  | CancelRequest _
+  | WorkDoneProgressCancel _
+  | SetTrace _
+  | WorkDoneProgress _
+  | CustomNotification _
+  | UnknownNotification _ -> None
 ;;
