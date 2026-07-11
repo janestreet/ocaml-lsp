@@ -71,7 +71,7 @@ possible and does not make any assumptions about IO.
   (csexp (>= 1.5))
   (ocamlformat-rpc-lib (>= 0.21.0))
   (odoc :with-doc)
-  (odoc-parser (= "3.1.0+ox"))
+  (odoc-parser (>= "3.1.0"))
   (merlin-lib (= "5.2.1-502+ox2"))
   ppx_yojson_conv
   core_unix

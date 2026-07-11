@@ -563,7 +563,7 @@ end = struct
           (including their locations!) are not type equal to each other. *)
       let ({ loc_start; loc_end; loc_ghost } : Loc.t) = string_loc in
       Ppx_string.parse
-        ~config:Ppx_string.config_for_string
+        ~config:(Ppx_string.config_for_string Local_input_heap_output)
         ~string_loc:{ loc_start; loc_end; loc_ghost }
         ~delimiter
         string

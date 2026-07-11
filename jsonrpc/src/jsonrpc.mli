@@ -10,6 +10,8 @@ module Json : sig
     | `List of t list
     | `Null
     | `String of string
+    | `Tuple of t list
+    | `Variant of string * t option
     ]
 
   (** Raised when conversions from json fail *)
