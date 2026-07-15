@@ -1,6 +1,8 @@
 open Import
 open Option.O
 
+let yet_another_unused = ()
+
 let diagnostic_regex, diagnostic_regex_marks =
   let msgs =
     ( Re.mark
