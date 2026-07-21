@@ -1,6 +1,6 @@
 open! Import
 
-type t [@@deriving bin_io, sexp_of]
+type t = Uri_lexer.t [@@deriving bin_io, sexp_of]
 
 include Json.Jsonable.S with type t := t
 
@@ -18,6 +18,7 @@ val of_path : string -> t
 val to_string : t -> string
 val of_string : string -> t
 val query : t -> string option
+val fragment : t -> string option
 
 (** Splits a [t] on [+share+]. The first segment in the second part is [+share+] *)
 val split_on_share : t -> (File_path.Part.t list * File_path.Part.t list) option

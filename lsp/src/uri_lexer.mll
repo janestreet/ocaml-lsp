@@ -6,7 +6,8 @@ type t =
   { scheme : string
   ; authority : string
   ; path : string
-  ; query: string option
+  ; query : string option
+  ; fragment : string option
   }
 
 let int_of_hex_char c =
@@ -84,7 +85,8 @@ and uri = parse
 ([^':' '/' '?' '#']+ as scheme ':') ?
 ("//" ([^ '/' '?' '#']* as authority)) ?
 ([^ '?' '#']* as path)
-(('?' ([^ '#']* as raw_query) '#'?)) ?
+(('?' ([^ '#']* as raw_query))) ?
+(('#' (_* as raw_fragment))) ?
 {
   let scheme = scheme |> Option.value ~default:"file" in
   let authority =
@@ -97,20 +99,25 @@ and uri = parse
       String.add_prefix_if_not_exists path ~prefix:"/"
     | _ -> path
   in
-  let query =
+  let decoded_query =
     match raw_query with
     | None -> None
     | Some c -> Some (query (Buffer.create (String.length c)) (Lexing.from_string c))
   in
-  { scheme; authority; path; query }
+  let fragment =
+    match raw_fragment with
+    | None -> None
+    | Some c -> Some (query (Buffer.create (String.length c)) (Lexing.from_string c))
+  in
+  { scheme; authority; path; query = decoded_query; fragment }
 }
 
 and path = parse
-| "" { { scheme = "file"; authority = ""; path = "/"; query = None } }
-| "//" ([^ '/']* as authority) (['/']_* as path) { { scheme = "file"; authority; path ; query = None } }
-| "//" ([^ '/']* as authority) { { scheme = "file"; authority; path = "/" ; query = None } }
-| ("/" _* as path) { { scheme = "file"; authority = ""; path ; query = None } }
-| (_* as path) { { scheme = "file"; authority = ""; path = "/" ^ path ; query = None } }
+| "" { { scheme = "file"; authority = ""; path = "/"; query = None; fragment = None } }
+| "//" ([^ '/']* as authority) (['/']_* as path) { { scheme = "file"; authority; path ; query = None; fragment = None } }
+| "//" ([^ '/']* as authority) { { scheme = "file"; authority; path = "/" ; query = None; fragment = None } }
+| ("/" _* as path) { { scheme = "file"; authority = ""; path ; query = None; fragment = None } }
+| (_* as path) { { scheme = "file"; authority = ""; path = "/" ^ path ; query = None; fragment = None } }
 
 {
   let of_string s =

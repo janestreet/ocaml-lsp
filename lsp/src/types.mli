@@ -487,7 +487,7 @@ module Range : sig
     { start : Position.t
     ; end_ : Position.t
     }
-  [@@deriving compare, sexp_of]
+  [@@deriving bin_io, compare, sexp_of]
 
   val create : end_:Position.t -> start:Position.t -> t
   val contains : t -> position:Position.t -> bool

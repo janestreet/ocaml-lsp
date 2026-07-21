@@ -316,22 +316,29 @@ let merlin_report_to_diagnostic ~diagnostics ~merlin ~error =
     ()
 ;;
 
-let diagnostic_of_lrgrep ~loc_start ~loc_end message =
+let diagnostic_of_lrgrep ~start ~end_ message =
   Lsp.Types.Diagnostic.create
     ~message:(`String message)
-    ~range:
-      (Range.create
-         ~start:(Position.of_lexical_position loc_start |> Option.value_exn)
-         ~end_:(Position.of_lexical_position loc_end |> Option.value_exn))
+    ~range:(Range.create ~start ~end_)
     ~source:"lsp/lrgrep"
     ()
 ;;
 
+(* Result of asking lrgrep to describe the first syntax error:
+   - [`No_error]: no error fond
+   - [`Diagnostic d]: error found and diagnostic created
+   - [`Error_producing_diagnostic]: lrgrep reported an error but at a location we can't
+     turn into an LSP range. For instance, the OSS lrgrep shim is a stub that always
+     reports a dummy location *)
 let first_syntax_error ~path ~contents =
   match Ocaml_lsp_lrgrep_shim.parse_file ~path (Lexing.from_string contents) with
-  | Ok () -> None
+  | Ok () -> `No_error
   | Error { msg; loc = { loc_start; loc_end; loc_ghost = _ } } ->
-    Some (diagnostic_of_lrgrep ~loc_start ~loc_end msg)
+    (match
+       Position.of_lexical_position loc_start, Position.of_lexical_position loc_end
+     with
+     | Some start, Some end_ -> `Diagnostic (diagnostic_of_lrgrep ~start ~end_ msg)
+     | None, _ | _, None -> `Error_producing_diagnostic)
 ;;
 
 (** Get merlin diagnostics for a single file. *)
@@ -387,11 +394,16 @@ let query_merlin_for_diagnostics ~log_info diagnostics merlin =
              (match diagnostics.which_diagnostics.merlin_syntax with
               | false -> []
               | true ->
-                (* Use lrgrep to get a (hopefully) better syntax error message. *)
+                (* Use lrgrep to get a better syntax error message. When lrgrep is fails
+                   to produce a diagnostic, fall back to merlin's own syntax diagnostics
+                   rather than raising. *)
                 let doc = Document.Merlin.to_doc merlin in
                 let path = Document.uri doc |> Uri.to_path in
                 let contents = Document.text doc in
-                first_syntax_error ~path ~contents |> Option.to_list))
+                (match first_syntax_error ~path ~contents with
+                 | `Diagnostic lrgrep_diagnostic -> [ lrgrep_diagnostic ]
+                 | `No_error -> []
+                 | `Error_producing_diagnostic -> syntax_diagnostics)))
       in
       List.sort
         merlin_diagnostics

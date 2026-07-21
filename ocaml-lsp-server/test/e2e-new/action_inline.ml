@@ -669,7 +669,7 @@ let _ =
 ;;
 
 let%expect_test "inlining works with |>" =
-  let%map.Deferred () =
+  let%bind.Deferred () =
     inline_test
       {|
 let _ =
@@ -681,7 +681,21 @@ let _ =
     {|
     let _ =
       let f x = x + 1 in
-      ((fun x -> x + 1) 3 f)
+      (3 + 1)
+    |}];
+  let%map.Deferred () =
+    inline_test
+      {|
+let _ =
+  let $f x = x + 1 in
+  3 |> (fun y -> y * 7) |> f
+|}
+  in
+  [%expect
+    {|
+    let _ =
+      let f x = x + 1 in
+      (let x = 3 |> (fun y -> y * 7) in x + 1)
     |}]
 ;;
 

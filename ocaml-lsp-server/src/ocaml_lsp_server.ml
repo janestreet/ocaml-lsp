@@ -916,8 +916,8 @@ let on_request
   | TypeHierarchySubtypes _ -> not_supported ()
 ;;
 
-(* Compute the relative directory path from a file URI, relative to the workspace root.
-   This is used for build-watch subscriptions. *)
+(* Compute the relative directory path from a file URI, relative to the Dune root. This is
+   used for build-watch subscriptions. *)
 let relative_dir_of_uri (state : State.t) uri =
   let file_path = Uri.drop_query uri |> Uri.to_path in
   let dir = Filename.dirname file_path in
@@ -927,7 +927,7 @@ let relative_dir_of_uri (state : State.t) uri =
       Option.map rootUri ~f:(fun root -> Uri.to_path root)
     | Uninitialized -> None
   in
-  match workspace_root_path with
+  match Option.map workspace_root_path ~f:Ocaml_lsp_dune_integration.dune_root_of with
   | Some root when String.is_prefix dir ~prefix:root ->
     let relative =
       String.chop_prefix_if_exists dir ~prefix:root

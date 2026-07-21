@@ -1,5 +1,15 @@
 _build
+_buildoss
 *.install
 *.merlin
 _opam
-
+_oxcaml
+deps/css-lsp/ocaml_lsp_css_lsp.ml
+deps/dune-integration/ocaml_lsp_dune_integration.ml
+deps/logging/ocaml_lsp_logging.ml
+deps/lrgrep-shim/ocaml_lsp_lrgrep_shim.ml
+deps/remote-lsp/ocaml_lsp_remote_lsp.ml
+deps/thread-safe-ivar/ocaml_lsp_thread_safe_ivar.ml
+deps/uri/src/ocaml_lsp_uri.ml
+deps/version/ocaml_lsp_version.ml
+deps/misc-shims/ocaml_lsp_misc_shims.ml

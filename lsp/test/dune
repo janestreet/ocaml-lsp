@@ -1,5 +1,5 @@
 (library
  (name lsp_test)
- (libraries base dyn lsp file_path ocaml_lsp_uri yojson)
+ (libraries base dyn lsp file_path yojson)
  (inline_tests)
  (preprocess (pps ppx_expect -expect-test-strict-indentation=false)))

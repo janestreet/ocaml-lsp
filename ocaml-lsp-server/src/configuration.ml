@@ -76,6 +76,7 @@ let update t { DidChangeConfigurationParams.settings } =
     ; ppx_css_colors = merge t.data.ppx_css_colors new_data.ppx_css_colors
     ; remote_lsp_fallback = merge t.data.remote_lsp_fallback new_data.remote_lsp_fallback
     ; dune_build_on_open = merge t.data.dune_build_on_open new_data.dune_build_on_open
+    ; use_fast_compl = merge t.data.use_fast_compl new_data.use_fast_compl
     ; fuzzy_completion = merge t.data.fuzzy_completion new_data.fuzzy_completion
     ; filter_double_underscore =
         merge t.data.filter_double_underscore new_data.filter_double_underscore
@@ -105,6 +106,12 @@ let shorten_merlin_diagnostics t =
 
 let dune_build_on_open t =
   match t.data.dune_build_on_open with
+  | Some { enable } -> enable
+  | None -> false
+;;
+
+let use_fast_compl t =
+  match t.data.use_fast_compl with
   | Some { enable } -> enable
   | None -> false
 ;;

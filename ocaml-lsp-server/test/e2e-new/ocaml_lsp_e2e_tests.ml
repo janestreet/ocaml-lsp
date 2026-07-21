@@ -4,7 +4,6 @@ module Action_mark_remove = Action_mark_remove
 module Code_actions = Code_actions
 module Completion = Completion
 module Completions = Completions
-module Diagnostics_filter = Diagnostics_filter
 module Doc_to_md = Doc_to_md
 module Document_flow = Document_flow
 module Documentation = Documentation

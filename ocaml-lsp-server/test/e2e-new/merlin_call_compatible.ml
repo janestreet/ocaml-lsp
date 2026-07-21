@@ -19,6 +19,16 @@ let call_merlin_compatible client command args result_as_sexp =
   Client.request client req
 ;;
 
+let normalize_merlin_analysis_module_name response =
+  (* Internal and OSS Dune print exceptions from wrapped modules using different paths. *)
+  response
+  |> Yojson.Safe.to_string
+  |> String.substr_replace_all
+       ~pattern:"Merlin_analysis.Destruct"
+       ~with_:"Merlin_analysis__Destruct"
+  |> Yojson.Safe.from_string
+;;
+
 let%expect_test "case-analysis on simple example" =
   let source =
     {|type t = {a: int * int; b: string}
@@ -46,7 +56,7 @@ let%expect_test "case-analysis on empty example" =
     let open Fiber.O in
     let args = [ "-start"; "2:9"; "-end"; "2:9" ] in
     let* response = call_merlin_compatible client "case-analysis" args false in
-    let () = Test.print_result response in
+    let () = response |> normalize_merlin_analysis_module_name |> Test.print_result in
     Fiber.return ()
   in
   let%map () = Helpers.test source request in

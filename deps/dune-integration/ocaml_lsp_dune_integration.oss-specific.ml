@@ -1,5 +1,7 @@
 open! Core
 
+let dune_root_of workspace_root = workspace_root
+
 module Dune_rpc = struct
   module Progress = struct
     type t =

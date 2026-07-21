@@ -278,6 +278,35 @@ let inlined_text pipeline task =
   Format.asprintf "(%a)" Pprintast.expression expr
 ;;
 
+let typedtree_application_args
+  pipeline
+  (args : (Typedtree.arg_label * Typedtree.apply_arg) list)
+  =
+  let parsetree_arg_label (label : Typedtree.arg_label)
+    : Ocaml_parsing.Asttypes.arg_label option
+    =
+    (* Convert from typedtree arg_label to asttypes *)
+    match label with
+    | Nolabel -> Some Nolabel
+    | Labelled label -> Some (Labelled label)
+    | Optional label -> Some (Optional label)
+    | Position _ -> None
+  in
+  List.map args ~f:(fun (label, arg) ->
+    match parsetree_arg_label label with
+    | None ->
+      (match arg with
+       | Typedtree.Arg _ -> None
+       | Omitted _ -> Some None)
+    | Some label ->
+      (match arg with
+       | Typedtree.Arg (expr, _sort) ->
+         Some (Some (label, find_parsetree_loc_exn pipeline expr.exp_loc))
+       | Omitted _ -> Some None))
+  |> Core.Option.all
+  |> Option.map ~f:List.filter_opt
+;;
+
 (** [inline_edits pipeline task] returns a list of inlining edits and an optional error
     value. An error will be generated if any of the potential inlinings is not allowed due
     to shadowing. The successful edits will still be returned *)
@@ -355,20 +384,18 @@ let inline_edits pipeline task =
   let expr_iter (iter : I.iterator) (expr : Typedtree.expression) =
     match expr.exp_desc with
     (* when inlining into an application context, attempt to beta reduce the result *)
-    | Texp_apply ({ exp_desc = Texp_ident { path = Pident id; _ }; _ }, _, _, _, _)
+    | Texp_apply ({ exp_desc = Texp_ident { path = Pident id; _ }; _ }, args, _, _, _)
       when Ident.same task.inlined_var id && not_shadowed expr.exp_env ->
-      let reduced_pexpr =
-        let app_pexpr = find_parsetree_loc_exn pipeline expr.exp_loc in
-        match app_pexpr.pexp_desc with
-        | Pexp_apply ({ pexp_desc = Pexp_ident _; _ }, args) ->
-          beta_reduce paths (H.Exp.apply inlined_pexpr args)
-        | _ -> app_pexpr
-      in
-      let newText =
-        Format.asprintf "(%a)" Pprintast.expression
-        @@ strip_merlin_attributes reduced_pexpr
-      in
-      insert_edit newText expr.exp_loc
+      (match typedtree_application_args pipeline args with
+       | None -> ()
+       | Some args ->
+         let app_pexpr = H.Exp.apply inlined_pexpr args in
+         let reduced_pexpr = beta_reduce paths app_pexpr in
+         let newText =
+           Format.asprintf "(%a)" Pprintast.expression
+           @@ strip_merlin_attributes reduced_pexpr
+         in
+         insert_edit newText expr.exp_loc)
     | Texp_apply (func, args, _, _, _) ->
       iter.expr iter func;
       List.iter args ~f:(fun (l, e) ->

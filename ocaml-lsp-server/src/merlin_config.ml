@@ -40,11 +40,21 @@ type t =
 let destroy (_ : t) = Fiber.return ()
 
 let create () path =
-  let initial =
+  let initial : Mconfig.t =
     let initial = Mconfig.initial in
-    { initial with
-      ocaml = { initial.ocaml with real_paths = false }
+    { ocaml = { initial.ocaml with real_paths = false }
     ; query = { initial.query with verbosity = Smart }
+    ; merlin =
+        { initial.merlin with
+          stdlib =
+            (* Project configuration (e.g. a [.merlin] file with a [STDLIB] directive)
+               still takes precedence over this override: [Mconfig.get_external_config]
+               only keeps the initial value when the loaded config doesn't set its own
+               stdlib. *)
+            (match Env_vars._STDLIB () with
+             | None -> initial.merlin.stdlib
+             | Some stdlib -> Some stdlib)
+        }
     }
   in
   match !dot_merlin with

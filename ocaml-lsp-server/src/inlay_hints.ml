@@ -173,11 +173,13 @@ let let_syntax_at typer pos =
 
 let hint_let_syntax_ppx_iter typer parsetree range create_inlay_hint =
   let current_let_syntax = ref [] in
+  let syntax_at pos =
+    Option.map (let_syntax_at typer pos) ~f:(fun path ->
+      "." ^ Format.asprintf "%a" Pprintast.longident path)
+  in
   let push_let_syntax pos =
-    match let_syntax_at typer pos with
-    | Some path ->
-      let syntax = "." ^ Format.asprintf "%a" Pprintast.longident path in
-      current_let_syntax := syntax :: !current_let_syntax
+    match syntax_at pos with
+    | Some syntax -> current_let_syntax := syntax :: !current_let_syntax
     | None ->
       (match !current_let_syntax with
        | hd :: _ -> current_let_syntax := hd :: !current_let_syntax
@@ -194,7 +196,9 @@ let hint_let_syntax_ppx_iter typer parsetree range create_inlay_hint =
     let (_ : bool) =
       List.fold_left items ~init:false ~f:(fun should_push item ->
         if should_push then push_let_syntax item.pstr_loc.loc_start;
+        let item_let_syntax = !current_let_syntax in
         iter.structure_item iter item;
+        current_let_syntax := item_let_syntax;
         match item.pstr_desc with
         | Pstr_open _ | Pstr_include _ -> true
         | _ -> false)
@@ -212,10 +216,13 @@ let hint_let_syntax_ppx_iter typer parsetree range create_inlay_hint =
       (* Generate annotation for [bind] and [map] extensions. *)
       (match name.txt with
        | "bind" | "map" ->
-         (match !current_let_syntax with
-          | syntax :: _ when range_overlaps_loc range name.loc ->
+         let syntax =
+           Option.first_some (syntax_at name.loc.loc_start) (List.hd !current_let_syntax)
+         in
+         (match syntax with
+          | Some syntax when range_overlaps_loc range name.loc ->
             create_inlay_hint syntax name.loc
-          | _ -> ())
+          | None | Some _ -> ())
        | _ -> ());
       iter.payload iter payload
     | _ -> Ast_iterator.default_iterator.expr iter expr

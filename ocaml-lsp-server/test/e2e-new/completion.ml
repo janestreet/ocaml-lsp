@@ -159,7 +159,7 @@ let%expect_test "Fuzzy completion enabled (VSCode behavior)" =
       "detail": "",
       "kind": 9,
       "label": "List",
-      "sortText": "0257",
+      "sortText": "0258",
       "textEdit": {
         "newText": "List",
         "range": {
@@ -172,7 +172,7 @@ let%expect_test "Fuzzy completion enabled (VSCode behavior)" =
       "detail": "type ('a : value_or_null) list = [] | (::) of 'a * 'a list",
       "kind": 25,
       "label": "list",
-      "sortText": "0344",
+      "sortText": "0348",
       "textEdit": {
         "newText": "list",
         "range": {
@@ -198,7 +198,7 @@ let%expect_test "Fuzzy completion enabled (VSCode behavior)" =
       "detail": "type ('a : value_or_null) list = [] | (::) of 'a * 'a list",
       "kind": 25,
       "label": "list",
-      "sortText": "0273",
+      "sortText": "0276",
       "textEdit": {
         "newText": "list",
         "range": {
@@ -211,7 +211,7 @@ let%expect_test "Fuzzy completion enabled (VSCode behavior)" =
       "detail": "",
       "kind": 9,
       "label": "List",
-      "sortText": "0317",
+      "sortText": "0321",
       "textEdit": {
         "newText": "List",
         "range": {
@@ -305,12 +305,12 @@ let%expect_test "can start completion after operator without space" =
       }
     }
     {
-      "detail": "('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list",
+      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
       "kind": 12,
-      "label": "map2",
+      "label": "mapi",
       "sortText": "0001",
       "textEdit": {
-        "newText": "map2",
+        "newText": "mapi",
         "range": {
           "start": { "line": 0, "character": 12 },
           "end": { "line": 0, "character": 14 }
@@ -318,12 +318,12 @@ let%expect_test "can start completion after operator without space" =
       }
     }
     {
-      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
+      "detail": "('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list",
       "kind": 12,
-      "label": "mapi",
+      "label": "map2",
       "sortText": "0002",
       "textEdit": {
-        "newText": "mapi",
+        "newText": "map2",
         "range": {
           "start": { "line": 0, "character": 12 },
           "end": { "line": 0, "character": 14 }
@@ -354,12 +354,12 @@ let%expect_test "can start completion after operator with space" =
       }
     }
     {
-      "detail": "('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list",
+      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
       "kind": 12,
-      "label": "map2",
+      "label": "mapi",
       "sortText": "0001",
       "textEdit": {
-        "newText": "map2",
+        "newText": "mapi",
         "range": {
           "start": { "line": 0, "character": 14 },
           "end": { "line": 0, "character": 16 }
@@ -367,12 +367,12 @@ let%expect_test "can start completion after operator with space" =
       }
     }
     {
-      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
+      "detail": "('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list",
       "kind": 12,
-      "label": "mapi",
+      "label": "map2",
       "sortText": "0002",
       "textEdit": {
-        "newText": "mapi",
+        "newText": "map2",
         "range": {
           "start": { "line": 0, "character": 14 },
           "end": { "line": 0, "character": 16 }
@@ -403,12 +403,12 @@ let%expect_test "can start completion in dot chain with tab" =
       }
     }
     {
-      "detail": "('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list",
+      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
       "kind": 12,
-      "label": "map2",
+      "label": "mapi",
       "sortText": "0001",
       "textEdit": {
-        "newText": "map2",
+        "newText": "mapi",
         "range": {
           "start": { "line": 0, "character": 15 },
           "end": { "line": 0, "character": 17 }
@@ -416,12 +416,12 @@ let%expect_test "can start completion in dot chain with tab" =
       }
     }
     {
-      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
+      "detail": "('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list",
       "kind": 12,
-      "label": "mapi",
+      "label": "map2",
       "sortText": "0002",
       "textEdit": {
-        "newText": "mapi",
+        "newText": "map2",
         "range": {
           "start": { "line": 0, "character": 15 },
           "end": { "line": 0, "character": 17 }
@@ -455,12 +455,12 @@ ma|ocaml}
       }
     }
     {
-      "detail": "('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list",
+      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
       "kind": 12,
-      "label": "map2",
+      "label": "mapi",
       "sortText": "0001",
       "textEdit": {
-        "newText": "map2",
+        "newText": "mapi",
         "range": {
           "start": { "line": 1, "character": 0 },
           "end": { "line": 1, "character": 2 }
@@ -468,12 +468,12 @@ ma|ocaml}
       }
     }
     {
-      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
+      "detail": "('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list",
       "kind": 12,
-      "label": "mapi",
+      "label": "map2",
       "sortText": "0002",
       "textEdit": {
-        "newText": "mapi",
+        "newText": "map2",
         "range": {
           "start": { "line": 1, "character": 0 },
           "end": { "line": 1, "character": 2 }
@@ -504,12 +504,12 @@ let%expect_test "can start completion in dot chain with space" =
       }
     }
     {
-      "detail": "('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list",
+      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
       "kind": 12,
-      "label": "map2",
+      "label": "mapi",
       "sortText": "0001",
       "textEdit": {
-        "newText": "map2",
+        "newText": "mapi",
         "range": {
           "start": { "line": 0, "character": 15 },
           "end": { "line": 0, "character": 17 }
@@ -517,12 +517,12 @@ let%expect_test "can start completion in dot chain with space" =
       }
     }
     {
-      "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
+      "detail": "('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list",
       "kind": 12,
-      "label": "mapi",
+      "label": "map2",
       "sortText": "0002",
       "textEdit": {
-        "newText": "mapi",
+        "newText": "map2",
         "range": {
           "start": { "line": 0, "character": 15 },
           "end": { "line": 0, "character": 17 }
@@ -1102,10 +1102,23 @@ let%expect_test "completes from a module" =
       }
     }
     {
+      "detail": "('a -> 'a -> int) -> 'a list -> 'a list -> 'a list",
+      "kind": 12,
+      "label": "merge",
+      "sortText": "0002",
+      "textEdit": {
+        "newText": "merge",
+        "range": {
+          "start": { "line": 0, "character": 13 },
+          "end": { "line": 0, "character": 14 }
+        }
+      }
+    }
+    {
       "detail": "(int -> 'a -> 'b) -> 'a list -> 'b list",
       "kind": 12,
       "label": "mapi",
-      "sortText": "0002",
+      "sortText": "0003",
       "textEdit": {
         "newText": "mapi",
         "range": {
@@ -1118,7 +1131,7 @@ let%expect_test "completes from a module" =
       "detail": "'a @ local -> 'a list @ local -> bool",
       "kind": 12,
       "label": "mem",
-      "sortText": "0003",
+      "sortText": "0004",
       "textEdit": {
         "newText": "mem",
         "range": {
@@ -1131,7 +1144,7 @@ let%expect_test "completes from a module" =
       "detail": "'a -> ('a * 'b) list -> bool",
       "kind": 12,
       "label": "mem_assoc",
-      "sortText": "0004",
+      "sortText": "0005",
       "textEdit": {
         "newText": "mem_assoc",
         "range": {
@@ -1144,7 +1157,7 @@ let%expect_test "completes from a module" =
       "detail": "'a -> ('a * 'b) list -> bool",
       "kind": 12,
       "label": "mem_assq",
-      "sortText": "0005",
+      "sortText": "0006",
       "textEdit": {
         "newText": "mem_assq",
         "range": {
@@ -1157,22 +1170,9 @@ let%expect_test "completes from a module" =
       "detail": "'a @ local -> 'a list @ local -> bool",
       "kind": 12,
       "label": "memq",
-      "sortText": "0006",
-      "textEdit": {
-        "newText": "memq",
-        "range": {
-          "start": { "line": 0, "character": 13 },
-          "end": { "line": 0, "character": 14 }
-        }
-      }
-    }
-    {
-      "detail": "('a -> 'a -> int) -> 'a list -> 'a list -> 'a list",
-      "kind": 12,
-      "label": "merge",
       "sortText": "0007",
       "textEdit": {
-        "newText": "merge",
+        "newText": "memq",
         "range": {
           "start": { "line": 0, "character": 13 },
           "end": { "line": 0, "character": 14 }

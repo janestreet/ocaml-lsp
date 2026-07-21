@@ -13,3 +13,4 @@ val remote_lsp_fallback_enabled : t -> bool
 val which_diagnostics : t -> Config_data.WhichDiagnostics.t
 val shorten_merlin_diagnostics : t -> bool
 val dune_build_on_open : t -> bool
+val use_fast_compl : t -> bool

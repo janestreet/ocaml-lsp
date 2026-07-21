@@ -413,3 +413,75 @@ let%expect_test "let-syntax ppx annotations" =
     |}];
   return ()
 ;;
+
+let%expect_test "local let-syntax open does not leak" =
+  let source =
+    {|
+module Deferred = struct
+  module Let_syntax = struct
+    module Let_syntax = struct end
+  end
+end
+
+module Async = struct
+  module Let_syntax = Deferred.Let_syntax
+end
+
+module Or_error = struct
+  module Let_syntax = struct
+    module Let_syntax = struct end
+  end
+end
+
+open Async
+
+let _function_a () =
+  let open Or_error.Let_syntax in
+  let%bind () = return () in
+  let%map something = return 1 in
+  something
+;;
+
+let _function_b () =
+  let%bind () = return () in
+  let%map something = return 1 in
+  something
+;;
+|}
+  in
+  let%bind () = apply_inlay_hints ~hint_let_syntax_ppx:true ~source () in
+  [%expect
+    {|
+    module Deferred = struct
+      module Let_syntax = struct
+        module Let_syntax = struct end
+      end
+    end
+
+    module Async = struct
+      module Let_syntax = Deferred.Let_syntax
+    end
+
+    module Or_error = struct
+      module Let_syntax = struct
+        module Let_syntax = struct end
+      end
+    end
+
+    open Async
+
+    let _function_a () =
+      let open Or_error.Let_syntax in
+      let%bind$.Or_error$ () = return () in
+      let%map$.Or_error$ something = return 1 in
+      something
+    ;;
+
+    let _function_b () =
+      let%bind$.Deferred$ () = return () in
+      let%map$.Deferred$ something = return 1 in
+      something
+    ;;
+    |}];
+  return ()
+;;

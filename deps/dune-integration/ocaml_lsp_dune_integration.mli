@@ -1,6 +1,8 @@
 (** Shim that funnels Dune integration dependencies through this library so only this
     library has direct dependencies on [diagnostic_parser] and [dune_rpc] *)
 
+val dune_root_of : string -> string
+
 module Dune_rpc : sig
   module Progress : sig
     type t =

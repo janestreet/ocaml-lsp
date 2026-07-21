@@ -65,6 +65,11 @@ module DuneBuildOnOpen = struct
   [@@deriving yojson] [@@yojson.allow_extra_fields]
 end
 
+module UseFastCompl = struct
+  type t = { enable : bool [@default false] }
+  [@@deriving yojson] [@@yojson.allow_extra_fields]
+end
+
 module FuzzyCompletion = struct
   type t = { enable : bool [@default false] }
   [@@deriving yojson] [@@yojson.allow_extra_fields]
@@ -102,6 +107,12 @@ type t =
        [@key "remoteLspFallback"] [@default None] [@yojson_drop_default ( = )]
   ; dune_build_on_open : DuneBuildOnOpen.t Json.Nullable_option.t
        [@key "duneBuildOnOpen"] [@default None] [@yojson_drop_default ( = )]
+  ; (* When true, [ocaml_lsp_wrapper] forwards [completion] requests to both the canonical
+       [ocaml-lsp] and the [ocaml-lsp-fast-compl]. NB: this is intentionally named
+       "FastCompl" instead of "FastCompletion" to map to the binary name
+       [ocaml_lsp_fast_compl]. *)
+    use_fast_compl : UseFastCompl.t Json.Nullable_option.t
+       [@key "useFastCompl"] [@default None] [@yojson_drop_default ( = )]
   ; (* When [true] ocaml-lsp ignore text after the last '.' and let the LSP client to
        fuzzy match. This improves UX for VSCode users. *)
     fuzzy_completion : FuzzyCompletion.t Json.Nullable_option.t
@@ -130,6 +141,7 @@ let default =
   ; ppx_css_colors = Some { enable = true }
   ; remote_lsp_fallback = Some { enable = false }
   ; dune_build_on_open = Some { enable = false }
+  ; use_fast_compl = Some { enable = false }
   ; fuzzy_completion = Some { enable = false }
   ; filter_double_underscore = Some { enable = true }
   ; document_symbol = Some { include_local_bindings = false }

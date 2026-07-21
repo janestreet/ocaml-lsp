@@ -21,9 +21,12 @@ let test_uri_parsing =
   let test s =
     let uri = Uri.t_of_yojson (`String s) in
     Printf.printf "%s -> %s\n" s (Uri.to_path uri);
-    match Uri.query uri with
+    (match Uri.query uri with
+     | None -> ()
+     | Some q -> Printf.printf "query: %s\n" q);
+    match Uri.fragment uri with
     | None -> ()
-    | Some q -> Printf.printf "query: %s\n" q
+    | Some fragment -> Printf.printf "fragment: %s\n" fragment
   in
   fun uris -> run_with_modes (fun () -> List.iter test uris)
 ;;
@@ -33,6 +36,8 @@ let%expect_test "test uri parsing" =
     [ "file:///Users/foo"
     ; "file:///c:/Users/foo"
     ; "file:///foo?x=y"
+    ; "file:///example#frag"
+    ; "file:///example?x=y#frag%23ment"
     ; "http://example?foo#"
     ; "http://example?"
     ; "http://example?ab%3D1%23"
@@ -44,8 +49,14 @@ let%expect_test "test uri parsing" =
     file:///c:/Users/foo -> c:/Users/foo
     file:///foo?x=y -> /foo?x=y
     query: x=y
+    file:///example#frag -> /example
+    fragment: frag
+    file:///example?x=y#frag%23ment -> /example?x=y
+    query: x=y
+    fragment: frag#ment
     http://example?foo# -> /?foo
     query: foo
+    fragment:
     http://example? -> /?
     query:
     http://example?ab%3D1%23 -> /?ab=1#
@@ -55,8 +66,14 @@ let%expect_test "test uri parsing" =
     file:///c:/Users/foo -> c:\Users\foo
     file:///foo?x=y -> \foo?x=y
     query: x=y
+    file:///example#frag -> \example
+    fragment: frag
+    file:///example?x=y#frag%23ment -> \example?x=y
+    query: x=y
+    fragment: frag#ment
     http://example?foo# -> \?foo
     query: foo
+    fragment:
     http://example? -> \?
     query:
     http://example?ab%3D1%23 -> \?ab=1#
@@ -265,7 +282,7 @@ let%expect_test "of_string -> to_string" =
   [%expect
     {|
     Unix:
-    file://shares/pröjects/c%23/#l12 -> file://shares/pr%C3%B6jects/c%23/
+    file://shares/pröjects/c%23/#l12 -> file://shares/pr%C3%B6jects/c%23/#l12
     file://sh%c3%a4res/path -> file://sh%C3%A4res/path
     untitled:c:/Users/jrieken/Code/abc.txt -> untitled:c%3A/Users/jrieken/Code/abc.txt
     untitled:C:/Users/jrieken/Code/abc.txt -> untitled:c%3A/Users/jrieken/Code/abc.txt
@@ -277,7 +294,7 @@ let%expect_test "of_string -> to_string" =
     file:///pro%2Fjects/ -> file:///pro/jects/
     vscode://mount/test.ml -> vscode://mount/test.ml
     Windows:
-    file://shares/pröjects/c%23/#l12 -> file://shares/pr%C3%B6jects/c%23/
+    file://shares/pröjects/c%23/#l12 -> file://shares/pr%C3%B6jects/c%23/#l12
     file://sh%c3%a4res/path -> file://sh%C3%A4res/path
     untitled:c:/Users/jrieken/Code/abc.txt -> untitled:c%3A/Users/jrieken/Code/abc.txt
     untitled:C:/Users/jrieken/Code/abc.txt -> untitled:c%3A/Users/jrieken/Code/abc.txt
@@ -336,18 +353,4 @@ let%expect_test "[split_on_share]" =
     (File_path.Relative.to_string
        (File_path.Relative.of_parts share_and_after |> Option.get));
   [%expect {| +share+/foo/bar/baz.ml |}]
-;;
-
-let%expect_test "[workspace_and_relative_path]" =
-  let uri =
-    Uri.of_path "/usr/local/home/user/workspaces/fe-123456789/+share+/foo/bar/baz.ml"
-  in
-  let workspace, relpath =
-    (* workspace_and_relative_path uses File_path, which is unix-only. *)
-    run_with_unix (fun () -> Ocaml_lsp_uri.workspace_and_relative_path uri) |> Option.get
-  in
-  print_endline (File_path.Absolute.to_string workspace);
-  [%expect {| /usr/local/home/user/workspaces/fe-123456789/+share+ |}];
-  print_endline (File_path.Relative.to_string relpath);
-  [%expect {| foo/bar/baz.ml |}]
 ;;
