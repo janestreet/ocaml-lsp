@@ -14,7 +14,7 @@ let f =
   [%expect
     {|
     let f =
-      let var_name = 1 in
+      let var_name = 1
     0 + var_name
     |}]
 ;;
