@@ -1,5 +1,5 @@
 _build
-_buildoss
+_build_oss
 *.install
 *.merlin
 _opam
