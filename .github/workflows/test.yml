@@ -24,4 +24,4 @@ jobs:
         run: make buildoss
 
       - name: Run tests
-        run: make runtestoss
+        run: make runtestoss AUTOCONF=autoconf
